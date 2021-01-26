@@ -13,6 +13,7 @@ target_link_libraries(
 		Ecole::libecole
 		Ecole::warnings
 		Ecole::sanitizers
+		CONAN_PKG::nlohmann_json
 )
 
 set_target_properties(
