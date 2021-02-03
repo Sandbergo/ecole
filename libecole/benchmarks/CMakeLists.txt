@@ -14,6 +14,7 @@ target_link_libraries(
 		Ecole::warnings
 		Ecole::sanitizers
 		CONAN_PKG::nlohmann_json
+		CONAN_PKG::cli11
 )
 
 set_target_properties(
