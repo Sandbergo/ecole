@@ -239,6 +239,7 @@ scip::Model CapacitatedFacilityLocationGenerator::generate_instance(
 	capacities = capacities * parameters.ratio * xt::sum(demands)() / xt::sum(capacities)();
 
 	auto model = scip::Model::prob_basic();
+	model.set_name(fmt::format("CapacitatedFacilityLocation-{}-{}", parameters.n_customers, parameters.n_facilities));
 	auto* const scip = model.get_scip_ptr();
 
 	auto const facility_vars = add_facility_vars(scip, fixed_costs);
