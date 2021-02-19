@@ -1,5 +1,9 @@
 
 import ecole as ec
+import skopt
+import numpy as np
+import matplotlib.pyplot as plt
+import numpy as np
 
 env = ec.environment.Configuring(
 
@@ -28,8 +32,7 @@ env = ec.environment.Configuring(
 instances = ec.instance.CombinatorialAuctionGenerator(
     n_items=100, n_bids=100, add_item_prob=0.7)
 
-import skopt
-import numpy as np
+
 
 # change those values as desired
 n_iters = 100
@@ -71,8 +74,6 @@ for i in range(n_iters):
     # update the optimizer
     opt.tell(x, -reward)  # minimize the negated reward (eq. maximize the reward)
 
-import matplotlib.pyplot as plt
-import numpy as np
 
 model = opt.models[-1]
 

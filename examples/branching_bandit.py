@@ -71,19 +71,18 @@ class Model(torch.nn.Module):
 
 class Policy(Model):
     def __init__(self):
-        super(Model, self).__init__()
+        super().__init__()
 
         self.n_input_feats = 92
         self.ff_size = 256
 
         self.activation = torch.nn.ReLU()
 
-        # Seed 61
         self.output_module = nn.Sequential(
             nn.Linear(self.n_input_feats, 1, bias=True),
         )
 
-        print(self.output_module)
+        # print(self.output_module)
         self.initialize_parameters()
 
     @staticmethod
@@ -121,9 +120,9 @@ PATIENCE = 10
 EARLY_STOPPING = 20
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model = Model()
-policy = Policy(model).to(DEVICE)
+policy = Policy().to(DEVICE)
 
-observation = instances[0].to(DEVICE)
+"""observation = instances[0].to(DEVICE)
 
 logits = policy(observation.constraint_features,
                 observation.edge_index,
@@ -131,7 +130,7 @@ logits = policy(observation.constraint_features,
                 observation.variable_features)
 action_distribution = F.softmax(logits[observation.candidates], dim=-1)
 
-print(action_distribution)
+print(action_distribution)"""
 
 policy = Policy()
 optimizer = optim.Adam(policy.parameters(), lr=1e-2)
@@ -167,13 +166,23 @@ def finish_episode():
     del policy.saved_log_probs[:]
 
 
+# -- TRAIN -- #
+
 log_interval = 10
 running_reward = 10
 for i_episode in count(1):
-    state, ep_reward = env.reset(), 0
+    observation, action_set, reward_offset, done, info = env.reset(next(instances))
+    ep_reward = 0
     for t in range(1, 10000):  # Don't infinite loop while learning
-        action = select_action(state)
-        state, reward, done, _ = env.step(action)
+        (scores, scores_are_expert), node_observation = observation
+        node_observation = (node_observation.row_features,
+                            (node_observation.edge_features.indices,
+                             node_observation.edge_features.values),
+                             node_observation.column_features)
+        
+        #action = action_set[scores[action_set].argmax()]
+        action = select_action(node_observation)
+        observation, action_set, reward, done, info = env.step(action)
         policy.rewards.append(reward)
         ep_reward += reward
         if done:

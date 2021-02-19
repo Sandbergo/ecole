@@ -3,10 +3,14 @@ import pickle
 import numpy as np
 import ecole
 from pathlib import Path
+import torch
+import torch.nn.functional as F
+import torch_geometric
 
 MAX_SAMPLES = 1000
 
 instances = ecole.instance.SetCoverGenerator(n_rows=500, n_cols=1000, density=0.05)
+
 
 class ExploreThenStrongBranch:
     """
@@ -17,14 +21,14 @@ class ExploreThenStrongBranch:
         self.expert_probability = expert_probability
         self.pseudocosts_function = ecole.observation.Pseudocosts()
         self.strong_branching_function = ecole.observation.StrongBranchingScores()
-    
+        
     def before_reset(self, model):
         """
         This function will be called at initialization of the environment (before dynamics are reset).
         """
         self.pseudocosts_function.before_reset(model)
         self.strong_branching_function.before_reset(model)
-    
+
     def extract(self, model, done):
         """
         Should we return strong branching or pseudocost scores at time node?
@@ -35,6 +39,7 @@ class ExploreThenStrongBranch:
             return (self.strong_branching_function.extract(model, done), True)
         else:
             return (self.pseudocosts_function.extract(model, done), False)
+
 
 # We can pass custom SCIP parameters easily
 scip_parameters = {'separating/maxrounds': 0, 'presolving/maxrestarts': 0, 'limits/time': 3600}
@@ -82,9 +87,6 @@ while not max_samples_reached:
     
     print(f"Episode {episode_counter}, {sample_counter} samples collected so far")
 
-import torch
-import torch.nn.functional as F
-import torch_geometric
 
 LEARNING_RATE = 0.001
 NB_EPOCHS = 50
