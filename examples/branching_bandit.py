@@ -2,9 +2,9 @@
 import ecole as ec
 # import skopt
 import numpy as np
-import matplotlib.pyplot as plt
-import numpy as np
-from tqdm import tqdm
+# import matplotlib.pyplot as plt
+# import numpy as np
+# from tqdm import tqdm
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -13,54 +13,13 @@ from torch.distributions import Categorical
 from itertools import count
 
 
-env = ec.environment.Configuring(
-
-    # set up a few SCIP parameters
-    scip_params={
-        "branching/scorefunc": 's',  # sum score function
-        "branching/vanillafullstrong/priority": 666666,  
-        # use vanillafullstrong (highest priority)
-        "presolving/maxrounds": 0,  # deactivate presolving
-    },
-
-    # observe
-    observation_function=ec.observation.Khalil2016(),
-
-    # minimize the total number of nodes
-    reward_function=-ec.reward.NNodes(),
-
-    # collect additional metrics for information purposes
-    information_function={
-        'nnodes': ec.reward.NNodes().cumsum(),
-        'lpiters': ec.reward.LpIterations().cumsum(),
-        'time': ec.reward.SolvingTime().cumsum(),
-    }
-)
-
-# infinite instance generator, new instances will be generated on-the-fly
-instances = ec.instance.CombinatorialAuctionGenerator(
-    n_items=100, n_bids=100, add_item_prob=0.7)
-
-
-# change those values as desired
-n_iters = 100
-
-
-# make the training process deterministic
-seed = 42
-
-env.seed(seed)  # environment (SCIP)
-instances.seed(seed)  # instance generator
-rng = np.random.RandomState(seed)  # optimizer
-
-
 class Model(torch.nn.Module):
     def initialize_parameters(self):
-        for l in self.modules():
-            if isinstance(l, torch.nn.Linear):
-                torch.nn.init.orthogonal_(l.weight.data, gain=1)
-                if l.bias is not None:
-                    torch.nn.init.constant_(l.bias.data, 0)
+        for layer in self.modules():
+            if isinstance(layer, torch.nn.Linear):
+                torch.nn.init.orthogonal_(layer.weight.data, gain=1)
+                if layer.bias is not None:
+                    torch.nn.init.constant_(layer.bias.data, 0)
 
     def save_state(self, filepath):
         torch.save(self.state_dict(), filepath)
@@ -114,28 +73,6 @@ class Policy(Model):
         return output
 
 
-LEARNING_RATE = 0.001
-NB_EPOCHS = 50
-PATIENCE = 10
-EARLY_STOPPING = 20
-DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-model = Model()
-policy = Policy().to(DEVICE)
-
-"""observation = instances[0].to(DEVICE)
-
-logits = policy(observation.constraint_features,
-                observation.edge_index,
-                observation.edge_attr,
-                observation.variable_features)
-action_distribution = F.softmax(logits[observation.candidates], dim=-1)
-
-print(action_distribution)"""
-
-policy = Policy()
-optimizer = optim.Adam(policy.parameters(), lr=1e-2)
-eps = np.finfo(np.float32).eps.item()
-
 
 def select_action(state):
     state = torch.from_numpy(state).float().unsqueeze(0)
@@ -166,7 +103,74 @@ def finish_episode():
     del policy.saved_log_probs[:]
 
 
+# -- ENVIRONMENT -- #
+
+env = ec.environment.Branching(
+
+    # set up a few SCIP parameters
+    scip_params={
+        "branching/scorefunc": 's',  # sum score function TODO: Change
+        "branching/vanillafullstrong/priority": 666666,  
+        # use vanillafullstrong (highest priority)
+        "presolving/maxrounds": 0,  # deactivate presolving
+        'limits/time': 3600
+    },
+
+    # observe
+    observation_function=ec.observation.Khalil2016(),
+
+    # minimize the total number of nodes
+    reward_function=-ec.reward.NNodes(),
+
+    # collect additional metrics for information purposes
+    information_function={
+        'nnodes': ec.reward.NNodes().cumsum(),
+        'lpiters': ec.reward.LpIterations().cumsum(),
+        'time': ec.reward.SolvingTime().cumsum(),
+    }
+)
+
+# infinite instance generator, new instances will be generated on-the-fly
+instances = ec.instance.CombinatorialAuctionGenerator(
+    n_items=100, n_bids=100, add_item_prob=0.7)
+
+
+# change those values as desired
+n_iters = 100
+
+
+# make the training process deterministic
+seed = 42
+
+env.seed(seed)  # environment (SCIP)
+instances.seed(seed)  # instance generator
+rng = np.random.RandomState(seed)  # optimizer
+
+
 # -- TRAIN -- #
+
+
+LEARNING_RATE = 0.001
+NB_EPOCHS = 50
+PATIENCE = 10
+EARLY_STOPPING = 20
+DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+model = Model()  # .to(DEVICE)
+policy = Policy()  # .to(DEVICE)
+
+"""observation = instances[0].to(DEVICE)
+
+logits = policy(observation.constraint_features,
+                observation.edge_index,
+                observation.edge_attr,
+                observation.variable_features)
+action_distribution = F.softmax(logits[observation.candidates], dim=-1)
+
+print(action_distribution)"""
+
+optimizer = optim.Adam(policy.parameters(), lr=1e-2)
+eps = np.finfo(np.float32).eps.item()
+
 
 log_interval = 10
 running_reward = 10
@@ -174,11 +178,16 @@ for i_episode in count(1):
     observation, action_set, reward_offset, done, info = env.reset(next(instances))
     ep_reward = 0
     for t in range(1, 10000):  # Don't infinite loop while learning
-        (scores, scores_are_expert), node_observation = observation
-        node_observation = (node_observation.row_features,
-                            (node_observation.edge_features.indices,
-                             node_observation.edge_features.values),
-                             node_observation.column_features)
+        # print(observation)
+        
+        """node_observation = (observation.row_features,
+                            (observation.edge_features.indices,
+                             observation.edge_features.values),
+                            observation.column_features)
+        node_observation = observation.row_features  # .to(DEVICE)"""
+        node_observation = observation
+        print(node_observation.shape)
+        exit(0)
         
         #action = action_set[scores[action_set].argmax()]
         action = select_action(node_observation)
@@ -194,8 +203,8 @@ for i_episode in count(1):
         print('Episode {}\tLast reward: {:.2f}\tAverage reward: {:.2f}'.format(
                 i_episode, ep_reward, running_reward))
     if running_reward > env.spec.reward_threshold:
-        print("Solved! Running reward is now {} and "
-              "the last episode runs to {} time steps!".format(running_reward, t))
+        print(f"Solved! Running reward is now {running_reward} and "
+              "the last episode runs to {t} time steps!")
         break
 
 """

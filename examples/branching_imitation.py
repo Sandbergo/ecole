@@ -59,7 +59,7 @@ Path('samples/').mkdir(exist_ok=True)
 max_samples_reached = False
 while not max_samples_reached:
     episode_counter += 1
-    
+
     observation, action_set, _, done, _ = env.reset(next(instances))
     while not done:
         (scores, scores_are_expert), node_observation = observation
@@ -67,7 +67,7 @@ while not max_samples_reached:
                             (node_observation.edge_features.indices, 
                              node_observation.edge_features.values),
                             node_observation.column_features)
-        
+       
         action = action_set[scores[action_set].argmax()]
 
         # Only save samples if they are coming from the expert (strong branching)
@@ -78,13 +78,13 @@ while not max_samples_reached:
 
             with gzip.open(filename, 'wb') as f:
                 pickle.dump(data, f)
-            
+
             # If we collected enough samples, we finish the current episode but stop saving samples
             if sample_counter == MAX_SAMPLES:
                 max_samples_reached = True
 
         observation, action_set, _, done, _ = env.step(action)
-    
+
     print(f"Episode {episode_counter}, {sample_counter} samples collected so far")
 
 
