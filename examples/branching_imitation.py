@@ -343,10 +343,10 @@ for epoch in range(NB_EPOCHS):
     print(f"Epoch {epoch+1}")
     
     train_loss, train_acc = process(policy, train_loader, optimizer)
-    print(f"Train loss: {train_loss:0.3f}, accuracy {train_acc:0.3f}" )
+    print(f"Train loss: {train_loss:0.3f}, accuracy {train_acc:0.3f}")
 
     valid_loss, valid_acc = process(policy, valid_loader, None)
-    print(f"Valid loss: {valid_loss:0.3f}, accuracy {valid_acc:0.3f}" )
+    print(f"Valid loss: {valid_loss:0.3f}, accuracy {valid_acc:0.3f}")
 
 torch.save(policy.state_dict(), 'trained_params.pkl')
 

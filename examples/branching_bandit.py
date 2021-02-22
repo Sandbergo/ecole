@@ -73,7 +73,6 @@ class Policy(Model):
         return output
 
 
-
 def select_action(state):
     state = torch.from_numpy(state).float().unsqueeze(0)
     probs = policy(state)
@@ -113,6 +112,7 @@ env = ec.environment.Branching(
         "branching/vanillafullstrong/priority": 666666,  
         # use vanillafullstrong (highest priority)
         "presolving/maxrounds": 0,  # deactivate presolving
+        'presolving/maxrestarts': 0,
         'limits/time': 3600
     },
 
@@ -174,22 +174,20 @@ eps = np.finfo(np.float32).eps.item()
 
 log_interval = 10
 running_reward = 10
-for i_episode in count(1):
-    observation, action_set, reward_offset, done, info = env.reset(next(instances))
+for i_episode, instance in enumerate(instances):
+    observation, action_set, reward_offset, done, info = env.reset(instance)
     ep_reward = 0
     for t in range(1, 10000):  # Don't infinite loop while learning
-        # print(observation)
+        print(action_set)
         
         """node_observation = (observation.row_features,
                             (observation.edge_features.indices,
                              observation.edge_features.values),
                             observation.column_features)
         node_observation = observation.row_features  # .to(DEVICE)"""
-        node_observation = observation
-        print(node_observation.shape)
-        exit(0)
+        node_observation = observation.astype(np.float32)  # .to(DEVICE)
         
-        #action = action_set[scores[action_set].argmax()]
+        # action = action_set[scores[action_set].argmax()]
         action = select_action(node_observation)
         observation, action_set, reward, done, info = env.step(action)
         policy.rewards.append(reward)
@@ -207,27 +205,6 @@ for i_episode in count(1):
               "the last episode runs to {t} time steps!")
         break
 
-"""
-# run the optimization
-for i in tqdm(range(n_iters), ascii=True):
-
-    # pick up a new random instance
-    instance = next(instances)
-
-    # start a new episode
-    env.reset(instance)
-
-    # get the next action from the optimizer
-    x = opt.ask()
-    action = {"branching/scorefac": x[0]}
-
-    # apply the action and collect the reward
-    _, _, reward, _, _ = env.step(action)
-
-    # update the optimizer
-    opt.tell(x, -reward)  # minimize the negated reward (eq. maximize the reward)
-
-"""
 # we set up more challenging instances
 test_instances = ec.instance.CombinatorialAuctionGenerator(
     n_items=150, n_bids=750, add_item_prob=0.7)
