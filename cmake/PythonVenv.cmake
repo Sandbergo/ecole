@@ -1,5 +1,3 @@
-cmake_minimum_required (VERSION 3.14)
-
 option(ENABLE_PYTHON_VENV "Install Ecole Python library in a virtual environment" OFF)
 
 if(NOT ENABLE_PYTHON_VENV)
@@ -9,7 +7,7 @@ endif()
 # Create a virtual environment (at configure time) where Ecole can safely be installed
 set(VENV_DIR "${CMAKE_CURRENT_BINARY_DIR}/venv")
 execute_process(
-	COMMAND "${PYTHON_EXECUTABLE}" -m venv --system-site-package "${VENV_DIR}"
+	COMMAND "${Python_EXECUTABLE}" -m venv --system-site-package "${VENV_DIR}"
 	RESULT_VARIABLE VENV_ERROR
 	ERROR_VARIABLE VENV_ERROR_MESSAGE
 )

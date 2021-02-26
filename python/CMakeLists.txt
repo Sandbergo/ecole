@@ -1,5 +1,3 @@
-cmake_minimum_required(VERSION 3.5)
-
 # Moving files to binary dir to create python package
 foreach(py_file "setup.py" "src/ecole/__init__.py")
 	configure_file(
@@ -8,25 +6,25 @@ foreach(py_file "setup.py" "src/ecole/__init__.py")
 	)
 endforeach(py_file)
 
-
-# Temporary override pybind11 version to 2.5 otherwise pinned down by xtensor-python
-# Until https://github.com/conda-forge/xtensor-python-feedstock/pull/65 is merged
-include(FetchContent)
-FetchContent_Declare(
-	PyBind11
-	URL https://github.com/pybind/pybind11/archive/v2.6.0.tar.gz
-	URL_HASH SHA256=90b705137b69ee3b5fc655eaca66d0dc9862ea1759226f7ccd3098425ae69571
+find_or_download_package(
+	NAME pybind11
+	URL https://github.com/pybind/pybind11/archive/v2.6.2.tar.gz
+	URL_HASH SHA256=8ff2fff22df038f5cd02cea8af56622bc67f5b64534f1b83b9f133b8366acff2
+	CONFIGURE_ARGS -D PYBIND11_TEST=OFF
 )
-set(PYBIND11_CPP_STANDARD -std=c++17)
-FetchContent_MakeAvailable(PyBind11)
-# find_package(pybind11 REQUIRED)
-find_package(xtensor REQUIRED)
-find_package(xtensor-python REQUIRED)
+find_package(xtensor REQUIRED) # It's already found by libecole but this seems to be required
+find_or_download_package(
+	NAME xtensor-python
+	URL https://github.com/xtensor-stack/xtensor-python/archive/0.25.1.tar.gz
+	URL_HASH SHA256=1e70db455a4dcba226c450bf9261a05a0c2fad513b84be35a3d139067356e6a1
+	CONFIGURE_ARGS -D BUILD_TESTS=OFF
+)
 
 pybind11_add_module(
-	ecole-python SYSTEM
+	ecole-python
 	src/ecole/core/core.cpp
 	src/ecole/core/scip.cpp
+	src/ecole/core/instance.cpp
 	src/ecole/core/data.cpp
 	src/ecole/core/observation.cpp
 	src/ecole/core/reward.cpp
@@ -38,19 +36,15 @@ target_include_directories(ecole-python PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/
 
 # Include the headers directly instead of using the CMake target due to it wrongly linking against
 # libpython
-target_include_directories(ecole-python SYSTEM PRIVATE "${NUMPY_INCLUDE_DIRS}")
+target_include_directories(ecole-python SYSTEM PRIVATE "${Python_NumPy_INCLUDE_DIRS}")
 
 target_link_libraries(
 	ecole-python
 	PRIVATE
 		Ecole::libecole
 		Ecole::warnings
-		xtensor
 		xtensor-python
 )
-if(CMAKE_BUILD_TYPE MATCHES Release)
-	target_link_libraries(ecole-python PRIVATE xtensor::optimize)
-endif()
 
 set_target_properties(
 	ecole-python PROPERTIES
@@ -72,13 +66,9 @@ endif()
 
 set(
 	PYTHON_FILES
-	"py.typed" "typing.py" "version.py"
-	"data.py" "observation.py" "reward.py" "information.py" "scip.py" "dynamics.py" "environment.py"
-	"_set_cover_generator.py"
-	"_combinatorial_auction_generator.py"
-	"_capacitated_facility_location_generator.py"
-	"_independent_set_generator.py"
-	"instance.py"
+	"py.typed" "typing.py"
+	"version.py" "scip.py" "instance.py"
+	"data.py" "observation.py" "reward.py" "information.py" "dynamics.py" "environment.py"
 )
 set(PYTHON_SOURCE_FILES ${PYTHON_FILES})
 list(TRANSFORM PYTHON_SOURCE_FILES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/src/ecole/")
@@ -101,9 +91,4 @@ if(ENABLE_PYTHON_VENV)
 	)
 
 	add_custom_target(ecole-venv ALL DEPENDS "${CMAKE_BINARY_DIR}/venv")
-endif()
-
-# Add test if this is the main project and testing is enabled
-if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME AND BUILD_TESTING)
-	add_subdirectory(tests)
 endif()

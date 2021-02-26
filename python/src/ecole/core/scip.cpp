@@ -19,7 +19,7 @@ void bind_submodule(py::module_ const& m) {
 
 	py::class_<Model, std::shared_ptr<Model>>(m, "Model")  //
 		.def_static("from_file", &Model::from_file, py::arg("filepath"), py::call_guard<py::gil_scoped_release>())
-		.def_static("prob_basic", &Model::prob_basic)
+		.def_static("prob_basic", &Model::prob_basic, py::arg("name") = "Model")
 		.def_static(
 			"from_pyscipopt",
 			[](py::object const& pyscipopt_model) {
@@ -42,7 +42,7 @@ void bind_submodule(py::module_ const& m) {
 		.def("copy_orig", &Model::copy_orig, py::call_guard<py::gil_scoped_release>())
 		.def(
 			"as_pyscipopt",
-			[](scip::Model const& model) {
+			[](scip::Model& model) {
 				auto const Model_class = py::module_::import("pyscipopt.scip").attr("Model");
 				auto const cap = py::capsule{reinterpret_cast<void*>(model.get_scip_ptr()), "scip"};
 				return Model_class.attr("from_ptr")(cap, py::arg("take_ownership") = false);
@@ -59,6 +59,8 @@ void bind_submodule(py::module_ const& m) {
 		.def("disable_presolve", &Model::disable_presolve)
 		.def("write_problem", &Model::write_problem, py::arg("filepath"), py::call_guard<py::gil_scoped_release>())
 
+		.def("transform_prob", &Model::transform_prob, py::call_guard<py::gil_scoped_release>())
+		.def("presolve", &Model::presolve, py::call_guard<py::gil_scoped_release>())
 		.def("solve", &Model::solve, py::call_guard<py::gil_scoped_release>())
 		.def("is_solved", &Model::is_solved);
 }

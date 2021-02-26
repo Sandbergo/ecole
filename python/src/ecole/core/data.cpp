@@ -5,6 +5,7 @@
 #include "ecole/data/constant.hpp"
 #include "ecole/data/map.hpp"
 #include "ecole/data/none.hpp"
+#include "ecole/data/timed.hpp"
 #include "ecole/data/vector.hpp"
 #include "ecole/scip/model.hpp"
 
@@ -24,9 +25,9 @@ public:
 	PyDataFunction() noexcept = default;
 	explicit PyDataFunction(py::object data_func) noexcept : data_function(std::move(data_func)) {}
 
-	void before_reset(scip::Model& model) override { data_function.attr("before_reset")(&model); }
+	void before_reset(scip::Model& model) final { data_function.attr("before_reset")(&model); }
 
-	py::object extract(scip::Model& model, bool done) override { return data_function.attr("extract")(&model, done); }
+	py::object extract(scip::Model& model, bool done) final { return data_function.attr("extract")(&model, done); }
 
 private:
 	py::object data_function;
@@ -87,6 +88,27 @@ void bind_submodule(py::module_ const& m) {
 			py::arg("model"),
 			py::arg("done"),
 			"Return data from all functions as a dict.");
+
+	using PyTimedFunction = TimedFunction<PyDataFunction>;
+	py::class_<PyTimedFunction>(m, "TimedFunction", "Time in seconds of any function.")
+		.def(
+			py::init([](py::object func, bool wall) {
+				return std::make_unique<PyTimedFunction>(PyDataFunction{std::move(func)}, wall);
+			}),
+			py::arg("func"),
+			py::arg("wall") = false)
+		.def(py::init<bool>(), py::arg("wall") = false)
+		.def(
+			"before_reset",
+			&PyTimedFunction::before_reset,
+			py::arg("model"),
+			"Call before_reset on the data extraction functions.")
+		.def(
+			"extract",
+			&PyTimedFunction::extract,
+			py::arg("model"),
+			py::arg("done"),
+			"Time the data extract function in seconds.");
 }
 
 }  // namespace ecole::data

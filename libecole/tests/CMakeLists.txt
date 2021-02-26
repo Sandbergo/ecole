@@ -1,15 +1,25 @@
-cmake_minimum_required(VERSION 3.5)
-
 add_executable(
 	test-libecole
-	main.cpp
+
+	src/main.cpp
 	src/conftest.cpp
 
 	src/test-traits.cpp
 	src/test-random.cpp
 
+	src/utility/test-chrono.cpp
+	src/utility/test-vector.cpp
+	src/utility/test-random.cpp
+
 	src/scip/test-scimpl.cpp
 	src/scip/test-model.cpp
+
+	src/instance/unit-tests.cpp
+	src/instance/test-set-cover.cpp
+	src/instance/test-independent-set.cpp
+	src/instance/test-independent-set-graph.cpp
+	src/instance/test-combinatorial-auction.cpp
+	src/instance/test-capacitated-facility-location.cpp
 
 	src/data/test-constant.cpp
 	src/data/test-none.cpp
@@ -18,10 +28,12 @@ add_executable(
 	src/data/test-map.cpp
 	src/data/test-multiary.cpp
 	src/data/test-parser.cpp
+	src/data/test-timed.cpp
 
 	src/reward/test-lpiterations.cpp
 	src/reward/test-isdone.cpp
 	src/reward/test-nnodes.cpp
+	src/reward/test-solvingtime.cpp
 
 	src/observation/test-nodebipartite.cpp
 	src/observation/test-strongbranchingscores.cpp
@@ -38,18 +50,19 @@ target_compile_definitions(
 	test-libecole PRIVATE TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data"
 )
 
-target_include_directories(test-libecole PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-
-conan_cmake_run(
-	CONANFILE conanfile.txt
-	BASIC_SETUP
-	CMAKE_TARGETS
-	NO_OUTPUT_DIRS
-	KEEP_RPATHS
-	SKIP_STD
-	OUTPUT_QUIET
+target_include_directories(
+	test-libecole
+	PRIVATE
+		${CMAKE_CURRENT_SOURCE_DIR}/src
+		${CMAKE_SOURCE_DIR}/libecole/src  # Add libecole private include
 )
-find_package(SCIP REQUIRED)
+
+find_or_download_package(
+	NAME Catch2
+	URL https://github.com/catchorg/Catch2/archive/v2.13.4.tar.gz
+	URL_HASH SHA256=e7eb70b3d0ac2ed7dcf14563ad808740c29e628edde99e973adad373a2b5e4df
+	CONFIGURE_ARGS -D CMAKE_BUILD_TYPE=Release
+)
 
 target_link_libraries(
 	test-libecole
@@ -57,12 +70,7 @@ target_link_libraries(
 		Ecole::libecole
 		Ecole::warnings
 		Ecole::sanitizers
-		CONAN_PKG::catch2
+		range-v3::range-v3
+		Catch2::Catch2
 		libscip
-)
-
-set_target_properties(test-libecole PROPERTIES
-	# Compiling with hidden visibility
-	CXX_VISIBILITY_PRESET hidden
-	VISIBILITY_INLINES_HIDDEN ON
 )
