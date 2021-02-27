@@ -2,14 +2,12 @@ import gzip
 import pickle
 import numpy as np
 import ecole
-from pathlib import Path
 import torch
 import torch.nn.functional as F
 import torch_geometric
-
-MAX_SAMPLES = 1000
-
-instances = ecole.instance.SetCoverGenerator(n_rows=500, n_cols=1000, density=0.05)
+import os
+from pathlib import Path
+from utilities import log
 
 
 class ExploreThenStrongBranch:
@@ -40,59 +38,6 @@ class ExploreThenStrongBranch:
         else:
             return (self.pseudocosts_function.extract(model, done), False)
 
-
-# We can pass custom SCIP parameters easily
-scip_parameters = {'separating/maxrounds': 0, 'presolving/maxrestarts': 0, 'limits/time': 3600}
-
-# Note how we can tuple observation functions to return complex state information
-env = ecole.environment.Branching(observation_function=(ExploreThenStrongBranch(expert_probability=0.05), 
-                                                        ecole.observation.NodeBipartite()), 
-                                  scip_params=scip_parameters)
-
-# This will seed the environment for reproducibility
-env.seed(0)
-
-episode_counter, sample_counter = 0, 0
-Path('samples/').mkdir(exist_ok=True)
-
-# We will solve problems (run episodes) until we have saved enough samples
-max_samples_reached = False
-while not max_samples_reached:
-    episode_counter += 1
-
-    observation, action_set, _, done, _ = env.reset(next(instances))
-    while not done:
-        (scores, scores_are_expert), node_observation = observation
-        node_observation = (node_observation.row_features,
-                            (node_observation.edge_features.indices, 
-                             node_observation.edge_features.values),
-                            node_observation.column_features)
-       
-        action = action_set[scores[action_set].argmax()]
-
-        # Only save samples if they are coming from the expert (strong branching)
-        if scores_are_expert and not max_samples_reached:
-            sample_counter += 1
-            data = [node_observation, action, action_set, scores]
-            filename = f'samples/sample_{sample_counter}.pkl'
-
-            with gzip.open(filename, 'wb') as f:
-                pickle.dump(data, f)
-
-            # If we collected enough samples, we finish the current episode but stop saving samples
-            if sample_counter == MAX_SAMPLES:
-                max_samples_reached = True
-
-        observation, action_set, _, done, _ = env.step(action)
-
-    print(f"Episode {episode_counter}, {sample_counter} samples collected so far")
-
-
-LEARNING_RATE = 0.001
-NB_EPOCHS = 50
-PATIENCE = 10
-EARLY_STOPPING = 20
-DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 class BipartiteNodeData(torch_geometric.data.Data):
     """
@@ -159,20 +104,12 @@ class GraphDataset(torch_geometric.data.Dataset):
 
         graph = BipartiteNodeData(constraint_features, edge_indices, edge_features, variable_features,
                                   candidates, candidate_choice, candidate_scores)
-        
+
         # We must tell pytorch geometric how many nodes there are, for indexing purposes
         graph.num_nodes = constraint_features.shape[0]+variable_features.shape[0]
-        
+
         return graph
 
-sample_files = [str(path) for path in Path('samples/').glob('sample_*.pkl')]
-train_files = sample_files[:int(0.8*len(sample_files))]
-valid_files = sample_files[int(0.8*len(sample_files)):]
-
-train_data = GraphDataset(train_files)
-train_loader = torch_geometric.data.DataLoader(train_data, batch_size=32, shuffle=True)
-valid_data = GraphDataset(valid_files)
-valid_loader = torch_geometric.data.DataLoader(valid_data, batch_size=128, shuffle=False)
 
 class GNNPolicy(torch.nn.Module):
     def __init__(self):
@@ -239,7 +176,7 @@ class BipartiteGraphConvolution(torch_geometric.nn.MessagePassing):
     def __init__(self):
         super().__init__('add')
         emb_size = 64
-        
+
         self.feature_module_left = torch.nn.Sequential(
             torch.nn.Linear(emb_size, emb_size)
         )
@@ -254,11 +191,9 @@ class BipartiteGraphConvolution(torch_geometric.nn.MessagePassing):
             torch.nn.ReLU(),
             torch.nn.Linear(emb_size, emb_size)
         )
-        
         self.post_conv_module = torch.nn.Sequential(
             torch.nn.LayerNorm(emb_size)
         )
-
         # output_layers
         self.output_module = torch.nn.Sequential(
             torch.nn.Linear(2*emb_size, emb_size),
@@ -279,16 +214,7 @@ class BipartiteGraphConvolution(torch_geometric.nn.MessagePassing):
                                            + self.feature_module_edge(edge_features) 
                                            + self.feature_module_right(node_features_j))
         return output
-    
 
-policy = GNNPolicy().to(DEVICE)
-
-observation = train_data[0].to(DEVICE)
-
-logits = policy(observation.constraint_features, observation.edge_index, observation.edge_attr, observation.variable_features)
-action_distribution = F.softmax(logits[observation.candidates], dim=-1)
-
-print(action_distribution)
 
 def process(policy, data_loader, optimizer=None):
     """
@@ -338,85 +264,172 @@ def pad_tensor(input_, pad_sizes, pad_value=-1e8):
                           for slice_ in output], dim=0)
     return output
 
-optimizer = torch.optim.Adam(policy.parameters(), lr=LEARNING_RATE)
-for epoch in range(NB_EPOCHS):
-    print(f"Epoch {epoch+1}")
-    
-    train_loss, train_acc = process(policy, train_loader, optimizer)
-    print(f"Train loss: {train_loss:0.3f}, accuracy {train_acc:0.3f}")
 
-    valid_loss, valid_acc = process(policy, valid_loader, None)
-    print(f"Valid loss: {valid_loss:0.3f}, accuracy {valid_acc:0.3f}")
+if __name__ == "__main__":
+    # -- MAKE DATASET -- #
 
-torch.save(policy.state_dict(), 'trained_params.pkl')
+    MAX_SAMPLES = 10_000
 
-scip_parameters = {'separating/maxrounds': 0, 'presolving/maxrestarts': 0, 'limits/time': 3600}
-env = ecole.environment.Branching(observation_function=ecole.observation.NodeBipartite(), 
-                                  information_function={"nb_nodes": ecole.reward.NNodes(), 
-                                                        "time": ecole.reward.SolvingTime()}, 
-                                  scip_params=scip_parameters)
-default_env = ecole.environment.Configuring(observation_function=None,
-                                            information_function={"nb_nodes": ecole.reward.NNodes(), 
-                                                                  "time": ecole.reward.SolvingTime()}, 
-                                            scip_params=scip_parameters)
+    Path('log/').mkdir(exist_ok=True)
+    logfile = 'log/log.txt'
 
-instances = ecole.instance.SetCoverGenerator(n_rows=500, n_cols=1000, density=0.05)
-for instance_count, instance in zip(range(20), instances):
-    # Run the GNN brancher
-    nb_nodes, time = 0, 0
-    observation, action_set, _, done, info = env.reset(instance)
-    nb_nodes += info['nb_nodes']
-    time += info['time']
-    while not done:
-        with torch.no_grad():
-            observation = (torch.from_numpy(observation.row_features.astype(np.float32)).to(DEVICE),
-                           torch.from_numpy(observation.edge_features.indices.astype(np.int64)).to(DEVICE), 
-                           torch.from_numpy(observation.edge_features.values.astype(np.float32)).view(-1, 1).to(DEVICE),
-                           torch.from_numpy(observation.column_features.astype(np.float32)).to(DEVICE))
-            logits = policy(*observation)
-            action = action_set[logits[action_set.astype(np.int64)].argmax()]
-            observation, action_set, _, done, info = env.step(action)
+    instances = ecole.instance.SetCoverGenerator(n_rows=500, n_cols=1000, density=0.05)
+
+    # We can pass custom SCIP parameters easily
+    scip_parameters = {'separating/maxrounds': 0, 'presolving/maxrestarts': 0, 'limits/time': 3600}
+
+    # Note how we can tuple observation functions to return complex state information
+    env = ecole.environment.Branching(observation_function=(ExploreThenStrongBranch(expert_probability=0.20), 
+                                                            ecole.observation.NodeBipartite()), 
+                                    scip_params=scip_parameters)
+    # TODO: original expert_prob=0.05
+    # This will seed the environment for reproducibility
+    env.seed(0)
+
+    episode_counter, sample_counter = 0, 0
+    Path('samples/').mkdir(exist_ok=True)
+
+    # We will solve problems (run episodes) until we have saved enough samples
+    max_samples_reached = False
+    while not max_samples_reached:
+        episode_counter += 1
+
+        observation, action_set, _, done, _ = env.reset(next(instances))
+        while not done:
+            (scores, scores_are_expert), node_observation = observation
+            node_observation = (node_observation.row_features,
+                                (node_observation.edge_features.indices, 
+                                node_observation.edge_features.values),
+                                node_observation.column_features)
+        
+            action = action_set[scores[action_set].argmax()]
+
+            # Only save samples if they are coming from the expert (strong branching)
+            if scores_are_expert and not max_samples_reached:
+                sample_counter += 1
+                data = [node_observation, action, action_set, scores]
+                filename = f'samples/sample_{sample_counter}.pkl'
+
+                with gzip.open(filename, 'wb') as f:
+                    pickle.dump(data, f)
+
+                # If we collected enough samples, we finish the current episode but stop saving samples
+                if sample_counter >= MAX_SAMPLES:
+                    max_samples_reached = True
+
+            observation, action_set, _, done, _ = env.step(action)
+
+        log(f"Episode {episode_counter}, {sample_counter} / {MAX SAMPLES} samples collected so far")
+
+
+    # -- TRAIN -- #
+    LEARNING_RATE = 0.001
+    NB_EPOCHS = 50
+    PATIENCE = 10
+    EARLY_STOPPING = 20
+    DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+    sample_files = [str(path) for path in Path('samples/').glob('sample_*.pkl')]
+    train_files = sample_files[:int(0.8*len(sample_files))]
+    valid_files = sample_files[int(0.8*len(sample_files)):]
+
+    train_data = GraphDataset(train_files)
+    train_loader = torch_geometric.data.DataLoader(train_data, batch_size=32, shuffle=True)
+    valid_data = GraphDataset(valid_files)
+    valid_loader = torch_geometric.data.DataLoader(valid_data, batch_size=128, shuffle=False)
+
+    policy = GNNPolicy().to(DEVICE)
+
+    # observation = train_data[0].to(DEVICE)
+
+    # logits = policy(observation.constraint_features, observation.edge_index, observation.edge_attr, observation.variable_features)
+    # action_distribution = F.softmax(logits[observation.candidates], dim=-1)
+
+    # print(action_distribution)
+
+    optimizer = torch.optim.Adam(policy.parameters(), lr=LEARNING_RATE)
+
+    for epoch in range(NB_EPOCHS):
+        log(f"Epoch {epoch+1}")
+        
+        train_loss, train_acc = process(policy, train_loader, optimizer)
+        log(f"Train loss: {train_loss:0.3f}, accuracy {train_acc:0.3f}")
+
+        valid_loss, valid_acc = process(policy, valid_loader, None)
+        log(f"Valid loss: {valid_loss:0.3f}, accuracy {valid_acc:0.3f}")
+
+    torch.save(policy.state_dict(), 'trained_params.pkl')
+
+
+    # -- EVALUATE -- #
+
+    scip_parameters = {'separating/maxrounds': 0, 'presolving/maxrestarts': 0, 'limits/time': 3600}
+    env = ecole.environment.Branching(observation_function=ecole.observation.NodeBipartite(), 
+                                    information_function={"nb_nodes": ecole.reward.NNodes(), 
+                                                            "time": ecole.reward.SolvingTime()}, 
+                                    scip_params=scip_parameters)
+    default_env = ecole.environment.Configuring(observation_function=None,
+                                                information_function={"nb_nodes": ecole.reward.NNodes(), 
+                                                                    "time": ecole.reward.SolvingTime()}, 
+                                                scip_params=scip_parameters)
+
+    instances = ecole.instance.SetCoverGenerator(n_rows=500, n_cols=1000, density=0.05)
+    for instance_count, instance in zip(range(20), instances):
+        # Run the GNN brancher
+        nb_nodes, time = 0, 0
+        observation, action_set, _, done, info = env.reset(instance)
         nb_nodes += info['nb_nodes']
         time += info['time']
+        while not done:
+            with torch.no_grad():
+                observation = (torch.from_numpy(observation.row_features.astype(np.float32)).to(DEVICE),
+                            torch.from_numpy(observation.edge_features.indices.astype(np.int64)).to(DEVICE), 
+                            torch.from_numpy(observation.edge_features.values.astype(np.float32)).view(-1, 1).to(DEVICE),
+                            torch.from_numpy(observation.column_features.astype(np.float32)).to(DEVICE))
+                logits = policy(*observation)
+                action = action_set[logits[action_set.astype(np.int64)].argmax()]
+                observation, action_set, _, done, info = env.step(action)
+            nb_nodes += info['nb_nodes']
+            time += info['time']
 
-    # Run SCIP's default brancher
-    default_env.reset(instance)
-    _, _, _, _, default_info = default_env.step({})
-    
-    print(f"Instance {instance_count: >3} | SCIP nb nodes    {int(default_info['nb_nodes']): >4d}  | SCIP time   {default_info['time']: >6.2f} ")
-    print(f"             | GNN  nb nodes    {int(nb_nodes): >4d}  | GNN  time   {time: >6.2f} ")
-    print(f"             | Gain         {100*(1-nb_nodes/default_info['nb_nodes']): >8.2f}% | Gain      {100*(1-time/default_info['time']): >8.2f}%")
+        # Run SCIP's default brancher
+        default_env.reset(instance)
+        _, _, _, _, default_info = default_env.step({})
+        
+        log(f"Instance {instance_count: >3} | SCIP nb nodes    {int(default_info['nb_nodes']): >4d}  | SCIP time   {default_info['time']: >6.2f} ")
+        log(f"             | GNN  nb nodes    {int(nb_nodes): >4d}  | GNN  time   {time: >6.2f} ")
+        log(f"             | Gain         {100*(1-nb_nodes/default_info['nb_nodes']): >8.2f}% | Gain      {100*(1-time/default_info['time']): >8.2f}%")
 
-instances = ecole.instance.SetCoverGenerator(n_rows=600, n_cols=1000, density=0.05)
-scip_parameters = {'separating/maxrounds': 0, 'presolving/maxrestarts': 0, 'limits/time': 3600}
-env = ecole.environment.Branching(observation_function=ecole.observation.NodeBipartite(), 
-                                  information_function={"nb_nodes": ecole.reward.NNodes().cumsum(), 
-                                                        "time": ecole.reward.SolvingTime().cumsum()}, 
-                                  scip_params=scip_parameters)
-default_env = ecole.environment.Configuring(observation_function=None,
-                                            information_function={"nb_nodes": ecole.reward.NNodes().cumsum(), 
-                                                                  "time": ecole.reward.SolvingTime().cumsum()}, 
-                                            scip_params=scip_parameters)
+    instances = ecole.instance.SetCoverGenerator(n_rows=500, n_cols=1000, density=0.05)
+    scip_parameters = {'separating/maxrounds': 0, 'presolving/maxrestarts': 0, 'limits/time': 3600}
+    env = ecole.environment.Branching(observation_function=ecole.observation.NodeBipartite(), 
+                                    information_function={"nb_nodes": ecole.reward.NNodes().cumsum(), 
+                                                            "time": ecole.reward.SolvingTime().cumsum()}, 
+                                    scip_params=scip_parameters)
+    default_env = ecole.environment.Configuring(observation_function=None,
+                                                information_function={"nb_nodes": ecole.reward.NNodes().cumsum(), 
+                                                                    "time": ecole.reward.SolvingTime().cumsum()}, 
+                                                scip_params=scip_parameters)
 
-for instance_count, instance in zip(range(20), instances):
-    # Run the GNN brancher
-    observation, action_set, _, done, info = env.reset(instance)
-    while not done:
-        with torch.no_grad():
-            observation = (torch.from_numpy(observation.row_features.astype(np.float32)).to(DEVICE),
-                           torch.from_numpy(observation.edge_features.indices.astype(np.int64)).to(DEVICE), 
-                           torch.from_numpy(observation.edge_features.values.astype(np.float32)).view(-1, 1).to(DEVICE),
-                           torch.from_numpy(observation.column_features.astype(np.float32)).to(DEVICE))
-            logits = policy(*observation)
-            action = action_set[logits[action_set.astype(np.int64)].argmax()]
-            observation, action_set, _, done, info = env.step(action)
-    nb_nodes = info['nb_nodes']
-    time = info['time']
+    for instance_count, instance in zip(range(20), instances):
+        # Run the GNN brancher
+        observation, action_set, _, done, info = env.reset(instance)
+        while not done:
+            with torch.no_grad():
+                observation = (torch.from_numpy(observation.row_features.astype(np.float32)).to(DEVICE),
+                            torch.from_numpy(observation.edge_features.indices.astype(np.int64)).to(DEVICE), 
+                            torch.from_numpy(observation.edge_features.values.astype(np.float32)).view(-1, 1).to(DEVICE),
+                            torch.from_numpy(observation.column_features.astype(np.float32)).to(DEVICE))
+                logits = policy(*observation)
+                action = action_set[logits[action_set.astype(np.int64)].argmax()]
+                observation, action_set, _, done, info = env.step(action)
+        nb_nodes = info['nb_nodes']
+        time = info['time']
 
-    # Run SCIP's default brancher
-    default_env.reset(instance)
-    _, _, _, _, default_info = default_env.step({})
+        # Run SCIP's default brancher
+        default_env.reset(instance)
+        _, _, _, _, default_info = default_env.step({})
 
-    print(f"Instance {instance_count: >3} | SCIP nb nodes    {int(default_info['nb_nodes']): >4d}  | SCIP time   {default_info['time']: >6.2f} ")
-    print(f"             | GNN  nb nodes    {int(nb_nodes): >4d}  | GNN  time   {time: >6.2f} ")
-    print(f"             | Gain         {100*(1-nb_nodes/default_info['nb_nodes']): >8.2f}% | Gain      {100*(1-time/default_info['time']): >8.2f}%")
+        log(f"Instance {instance_count: >3} | SCIP nb nodes    {int(default_info['nb_nodes']): >4d}  | SCIP time   {default_info['time']: >6.2f} ")
+        log(f"             | GNN  nb nodes    {int(nb_nodes): >4d}  | GNN  time   {time: >6.2f} ")
+        log(f"             | Gain         {100*(1-nb_nodes/default_info['nb_nodes']): >8.2f}% | Gain      {100*(1-time/default_info['time']): >8.2f}%")
