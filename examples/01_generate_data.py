@@ -48,7 +48,8 @@ if __name__ == "__main__":
 
     # Note how we can tuple observation functions to return complex state information
     env = ecole.environment.Branching(observation_function=(ExploreThenStrongBranch(expert_probability=0.2),
-                                                            ecole.observation.NodeBipartite()), 
+                                                            ecole.observation.NodeBipartite(),
+                                                            ecole.observation.Khalil2016()), 
                                     scip_params=scip_parameters)
     # TODO: original expert_prob=0.05
     # This will seed the environment for reproducibility
@@ -67,50 +68,58 @@ if __name__ == "__main__":
 
     node_record_prob = 1.0
 
-    basedir = "examples/data/samples"
+    basedir = "examples/data/samples/"
 
     generators = {
-        'setcover':ecole.instance.SetCoverGenerator(n_rows=500, n_cols=1000, density=0.05),
+        #'setcover':ecole.instance.SetCoverGenerator(n_rows=500, n_cols=1000, density=0.05),
         'cauctions': ecole.instance.CombinatorialAuctionGenerator(n_items=100, n_bids=500),
         'indset': ecole.instance.CapacitatedFacilityLocationGenerator(n_customers=100, n_facilities=100),
         'faciliites': ecole.instance.IndependentSetGenerator(n_nodes=500, graph_type="erdos_renyi"),
         }
     
-    for problem_type in generators.keys():
-        log(f'Generating {MAX_SAMPLES} {problem_type} instances')
-        instances = generators[problem_type]
-        episode_counter, sample_counter = 0, 0
-        path = f'{basedir}/{problem_type}/train/'
-        Path(path).mkdir(exist_ok=True)
+    try:
+        for problem_type in generators.keys():
+            log(f'Generating {MAX_SAMPLES} {problem_type} instances')
+            instances = generators[problem_type]
+            episode_counter, sample_counter = 0, 0
+            path = f'{basedir}/{problem_type}/train/'
+            os.makedirs(Path(path), exist_ok=True)
 
-        # We will solve problems (run episodes) until we have saved enough samples
-        max_samples_reached = False
-        while not max_samples_reached:
-            episode_counter += 1
+            # We will solve problems (run episodes) until we have saved enough samples
+            max_samples_reached = False
+            while not max_samples_reached:
+                episode_counter += 1
 
-            observation, action_set, _, done, _ = env.reset(next(instances))
-            while not done:
-                (scores, scores_are_expert), node_observation = observation
-                node_observation = (node_observation.row_features,
-                                    (node_observation.edge_features.indices, 
-                                    node_observation.edge_features.values),
-                                    node_observation.column_features)
-            
-                action = action_set[scores[action_set].argmax()]
-
-                # Only save samples if they are coming from the expert (strong branching)
-                if scores_are_expert and not max_samples_reached:
-                    sample_counter += 1
-                    data = [node_observation, action, action_set, scores]
-                    filename = f'{path}/sample_{sample_counter}.pkl'
-
-                    with gzip.open(filename, 'wb') as f:
-                        pickle.dump(data, f)
+                observation, action_set, _, done, _ = env.reset(next(instances))
+                while not done:
+                    (scores, scores_are_expert), node_observation, khalil2016 = observation
+                    print(len(node_observation.row_features), len(node_observation.row_features[0]))
+                    print(len(node_observation.edge_features.indices), len(node_observation.edge_features.indices[0]))
+                    node_observation = (node_observation.row_features,
+                                        (node_observation.edge_features.indices, 
+                                        node_observation.edge_features.values),
+                                        node_observation.column_features)
+                
+                    action = action_set[scores[action_set].argmax()]
                     
-                    # If we collected enough samples, we finish the current episode but stop saving samples
-                    if sample_counter >= MAX_SAMPLES:
-                        max_samples_reached = True
+                    print(len(khalil2016), len(khalil2016[0]) )
+                    exit(0)
+                    # Only save samples if they are coming from the expert (strong branching)
+                    if scores_are_expert and not max_samples_reached:
+                        sample_counter += 1
+                        data = [node_observation, action, action_set, scores]
+                        filename = f'{path}/sample_{sample_counter}.pkl'
 
-                observation, action_set, _, done, _ = env.step(action)
+                        with gzip.open(filename, 'wb') as f:
+                            pickle.dump(data, f)
+                        
+                        # If we collected enough samples, we finish the current episode but stop saving samples
+                        if sample_counter >= MAX_SAMPLES:
+                            max_samples_reached = True
 
-            log(f"Episode {episode_counter}, {sample_counter} / {MAX_SAMPLES} samples collected so far")
+                    observation, action_set, _, done, _ = env.step(action)
+
+                log(f"Episode {episode_counter}, {sample_counter} / {MAX_SAMPLES} samples collected so far")
+    except Exception as e:
+        log(repr(e))
+        raise e
