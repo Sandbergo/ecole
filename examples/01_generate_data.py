@@ -73,8 +73,8 @@ if __name__ == "__main__":
     generators = {
         #'setcover':ecole.instance.SetCoverGenerator(n_rows=500, n_cols=1000, density=0.05),
         'cauctions': ecole.instance.CombinatorialAuctionGenerator(n_items=100, n_bids=500),
-        'indset': ecole.instance.CapacitatedFacilityLocationGenerator(n_customers=100, n_facilities=100),
-        'faciliites': ecole.instance.IndependentSetGenerator(n_nodes=500, graph_type="erdos_renyi"),
+        #'indset': ecole.instance.CapacitatedFacilityLocationGenerator(n_customers=100, n_facilities=100),
+        #'faciliites': ecole.instance.IndependentSetGenerator(n_nodes=500, graph_type="erdos_renyi"),
         }
     
     try:
@@ -93,17 +93,27 @@ if __name__ == "__main__":
                 observation, action_set, _, done, _ = env.reset(next(instances))
                 while not done:
                     (scores, scores_are_expert), node_observation, khalil2016 = observation
-                    print(len(node_observation.row_features), len(node_observation.row_features[0]))
-                    print(len(node_observation.edge_features.indices), len(node_observation.edge_features.indices[0]))
+                    # print(len(action_set))
+                    #print('row: ', len(node_observation.row_features), len(node_observation.row_features[0]))
+                    #print('edge ix: ', len(node_observation.edge_features.indices), len(node_observation.edge_features.indices[0]))
+                    #print('edge val: ', len(node_observation.edge_features.values))
+                    #print('col: ', len(node_observation.column_features), len(node_observation.column_features[0]))
+                    
                     node_observation = (node_observation.row_features,
                                         (node_observation.edge_features.indices, 
                                         node_observation.edge_features.values),
-                                        node_observation.column_features)
-                
+                                        node_observation.column_features, 
+                                        khalil2016)
+                    # save khalil as well :) 
                     action = action_set[scores[action_set].argmax()]
-                    
-                    print(len(khalil2016), len(khalil2016[0]) )
-                    exit(0)
+                    np_kh = np.array([np.array(xi) for xi in khalil2016])
+                    #print(np_kh.shape)
+                    #print('Khalil: ', len(khalil2016), len(khalil2016[0]) )
+                    #print(khalil2016[0], '\n\n')
+                    #print(khalil2016[-1])
+                    #print(action_set)
+
+                    # exit(0)
                     # Only save samples if they are coming from the expert (strong branching)
                     if scores_are_expert and not max_samples_reached:
                         sample_counter += 1
@@ -120,6 +130,7 @@ if __name__ == "__main__":
                     observation, action_set, _, done, _ = env.step(action)
 
                 log(f"Episode {episode_counter}, {sample_counter} / {MAX_SAMPLES} samples collected so far")
+                #exit(0)
     except Exception as e:
         log(repr(e))
         raise e

@@ -61,7 +61,7 @@ class GraphDataset(torch_geometric.data.Dataset):
 
         sample_observation, sample_action, sample_action_set, sample_scores = sample
 
-        constraint_features, (edge_indices, edge_features), variable_features = sample_observation
+        constraint_features, (edge_indices, edge_features), variable_features, khalil_features = sample_observation
         constraint_features = torch.from_numpy(constraint_features.astype(np.float32))
         edge_indices = torch.from_numpy(edge_indices.astype(np.int64))
         edge_features = torch.from_numpy(edge_features.astype(np.float32)).view(-1, 1)
