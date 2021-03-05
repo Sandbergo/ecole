@@ -48,8 +48,7 @@ if __name__ == "__main__":
 
     # Note how we can tuple observation functions to return complex state information
     env = ecole.environment.Branching(observation_function=(ExploreThenStrongBranch(expert_probability=0.2),
-                                                            ecole.observation.NodeBipartite(),
-                                                            ecole.observation.Khalil2016()), 
+                                                            ecole.observation.NodeBipartite()), 
                                     scip_params=scip_parameters)
     # TODO: original expert_prob=0.05
     # This will seed the environment for reproducibility
