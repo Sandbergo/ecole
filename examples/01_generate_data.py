@@ -47,7 +47,7 @@ if __name__ == "__main__":
     scip_parameters = {'separating/maxrounds': 0, 'presolving/maxrestarts': 0, 'limits/time': 3600}
 
     # Note how we can tuple observation functions to return complex state information
-    env = ecole.environment.Branching(observation_function=(ExploreThenStrongBranch(expert_probability=0.2),
+    env = ecole.environment.Branching(observation_function=(ExploreThenStrongBranch(expert_probability=0.05),
                                                             ecole.observation.NodeBipartite()), 
                                     scip_params=scip_parameters)
     # TODO: original expert_prob=0.05
@@ -57,7 +57,7 @@ if __name__ == "__main__":
     PROBLEMS = {'setcover': (500, 1000, 0.05), 
                 'cauctions': (100, 500, 0),
                 'indset': (750, 4, 0),
-                'faciliites': (100, 100, 5) }
+                'facilities': (100, 100, 5) }
 
     MAX_SAMPLES = 50_000  # 150000
     # VALID_SIZE = 10_000  # 30000
@@ -73,7 +73,7 @@ if __name__ == "__main__":
         #'setcover':ecole.instance.SetCoverGenerator(n_rows=500, n_cols=1000, density=0.05),
         'cauctions': ecole.instance.CombinatorialAuctionGenerator(n_items=100, n_bids=500),
         #'indset': ecole.instance.CapacitatedFacilityLocationGenerator(n_customers=100, n_facilities=100),
-        #'faciliites': ecole.instance.IndependentSetGenerator(n_nodes=500, graph_type="erdos_renyi"),
+        #'facilities': ecole.instance.IndependentSetGenerator(n_nodes=500, graph_type="erdos_renyi"),
         }
     
     try:
@@ -91,31 +91,20 @@ if __name__ == "__main__":
 
                 observation, action_set, _, done, _ = env.reset(next(instances))
                 while not done:
-                    (scores, scores_are_expert), node_observation, khalil2016 = observation
-                    # print(len(action_set))
-                    #print('row: ', len(node_observation.row_features), len(node_observation.row_features[0]))
-                    #print('edge ix: ', len(node_observation.edge_features.indices), len(node_observation.edge_features.indices[0]))
-                    #print('edge val: ', len(node_observation.edge_features.values))
-                    #print('col: ', len(node_observation.column_features), len(node_observation.column_features[0]))
-                    
-                    node_observation = (node_observation.row_features,
-                                        (node_observation.edge_features.indices, 
-                                        node_observation.edge_features.values),
-                                        node_observation.column_features, 
-                                        khalil2016)
-                    # save khalil as well :) 
-                    action = action_set[scores[action_set].argmax()]
-                    np_kh = np.array([np.array(xi) for xi in khalil2016])
-                    #print(np_kh.shape)
-                    #print('Khalil: ', len(khalil2016), len(khalil2016[0]) )
-                    #print(khalil2016[0], '\n\n')
-                    #print(khalil2016[-1])
-                    #print(action_set)
-
+                    (scores, scores_are_expert), node_observation = observation
+                   
                     # exit(0)
                     # Only save samples if they are coming from the expert (strong branching)
                     if scores_are_expert and not max_samples_reached:
+
                         sample_counter += 1
+                        node_observation = (node_observation.row_features,
+                                        (node_observation.edge_features.indices, 
+                                        node_observation.edge_features.values),
+                                        node_observation.column_features, )
+                        # save khalil as well :) 
+                        action = action_set[scores[action_set].argmax()]
+                        
                         data = [node_observation, action, action_set, scores]
                         filename = f'{path}/sample_{sample_counter}.pkl'
 
