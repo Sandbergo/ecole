@@ -18,28 +18,21 @@ class ExploreThenStrongBranch:
     This custom observation function class will randomly return either strong branching scores (expensive expert) 
     or pseudocost scores (weak expert for exploration) when called at every node.
     """
-    def __init__(self, expert_probability=0.05):
-        self.expert_probability = expert_probability
+    def __init__(self):
         self.pseudocosts_function = ecole.observation.Pseudocosts()
-        self.strong_branching_function = ecole.observation.StrongBranchingScores()
         
     def before_reset(self, model):
         """
         This function will be called at initialization of the environment (before dynamics are reset).
         """
         self.pseudocosts_function.before_reset(model)
-        self.strong_branching_function.before_reset(model)
 
     def extract(self, model, done):
         """
         Should we return strong branching or pseudocost scores at time node?
         """
-        probabilities = [1-self.expert_probability, self.expert_probability]
-        expert_chosen = bool(np.random.choice(np.arange(2), p=probabilities))
-        if expert_chosen:
-            return (self.strong_branching_function.extract(model, done), True)
-        else:
-            return (self.pseudocosts_function.extract(model, done), False)
+
+        return self.pseudocosts_function.extract(model, done)
 
 
 
@@ -56,13 +49,13 @@ if __name__ == "__main__":
 
     scip_parameters = {'separating/maxrounds': 0, 'presolving/maxrestarts': 0, 'limits/time': 100} # TODO: revert to 2700
     env = ecole.environment.Branching(observation_function=ecole.observation.NodeBipartite(), 
-                                    information_function={"nb_nodes": ecole.reward.NNodes(), 
-                                                            "time": ecole.reward.SolvingTime()}, 
+                                    information_function={"nb_nodes": ecole.reward.NNodes().cumsum(), 
+                                                                    "time": ecole.reward.SolvingTime().cumsum()}, 
                                     scip_params=scip_parameters)
     
-    default_env = ecole.environment.Branching(observation_function=ExploreThenStrongBranch(expert_probability=0.05),
-                                                information_function={"nb_nodes": ecole.reward.NNodes(), 
-                                                                      "time": ecole.reward.SolvingTime()}, 
+    default_env = ecole.environment.Branching(observation_function=ExploreThenStrongBranch(),
+                                                information_function={"nb_nodes": ecole.reward.NNodes().cumsum(), 
+                                                                    "time": ecole.reward.SolvingTime().cumsum()}, 
                                                 scip_params=scip_parameters)
     
     generators = {
@@ -99,12 +92,10 @@ if __name__ == "__main__":
             for instance_count, instance in zip(range(5), instances):
                 
                 # Run the GNN brancher
-                nb_nodes, time = 0, 0
-                #default_env.reset(instance)
-                """observation, action_set, _, done, info = env.reset(instance)
                 
-                nb_nodes += info['nb_nodes']
-                time += info['time']
+                #default_env.reset(instance)
+                observation, action_set, _, done, info = env.reset(instance)
+                
                 while not done:
                     with torch.no_grad():
                         observation = (torch.from_numpy(observation.row_features.astype(np.float32)).to(DEVICE),
@@ -114,35 +105,31 @@ if __name__ == "__main__":
                         logits = policy(*observation)
                         action = action_set[logits[action_set.astype(np.int64)].argmax()]
                         observation, action_set, _, done, info = env.step(action)
-                    nb_nodes += info['nb_nodes']
-                    time += info['time']"""
-              
+                nb_nodes, time = info['nb_nodes'], info['time']
                 # Run SCIP's default brancher
-                default_nb_nodes = 0
-                default_time = 0
                 
                 # default_env.reset(instance)
                 #_, _, _, done, default_info = default_env.step({})
                 #print(done)
                 observation, action_set, _, done, info = default_env.reset(instance)
+                
                 while not done:
-                    (scores) = observation
-                    print(type(scores))
+                    scores = observation
                     action = action_set[observation[action_set].argmax()]
-
                     observation, action_set, _, done, info = default_env.step(action)
-                    default_nb_nodes += info['nb_nodes']
-                    default_time += info['time']
+                defaul_nb_nodes, default_time = info['nb_nodes'], info['time'] 
                 
                 #log(f"Instance {instance_count: >3} | SCIP nb nodes    {int(default_info['nb_nodes']): >4d}  | SCIP time   {default_info['time']: >6.2f} ")
                 #log(f"             | GNN  nb nodes    {int(nb_nodes): >4d}  | GNN  time   {time: >6.2f} ")
                 #log(f"             | Gain         {100*(1-nb_nodes/default_info['nb_nodes']): >8.2f}% | Gain      {100*(1-time/default_info['time']): >8.2f}%")
+                
+                
                 scip_nodes.append(default_nb_nodes)
                 scip_time.append(default_time)
                 gnn_nodes.append(nb_nodes)
                 gnn_time.append(time)
-            log(f"SCIP nb nodes    {int(np.mean(scip_nodes)): >4d}  | SCIP time   {np.mean(scip_nodes): >6.2f} ")
-            log(f"GNN nb nodes     {int(np.mean(gnn_nodes)): >4d}  |  GNN time   {np.mean(gnn_nodes): >6.2f} ")
+            log(f"SCIP nb nodes    {int(np.mean(scip_nodes)): >4d}  | SCIP time   {np.mean(scip_time): >6.2f} ")
+            log(f"GNN nb nodes     {int(np.mean(gnn_nodes)): >4d}  |  GNN time   {np.mean(gnn_time): >6.2f} ")
             #log(f"             | completed...")
                 
             i += 1
