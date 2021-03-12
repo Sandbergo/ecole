@@ -44,7 +44,7 @@ if __name__ == "__main__":
     log(f'Device: {DEVICE}')
 
     policy = GNNPolicy().to(DEVICE)
-    policy.load_state_dict(torch.load('examples/models/gnn_trained_params_cauctions.pkl'))
+    policy.load_state_dict(torch.load('examples/models/gnn_trained_params_setcover.pkl'))
     
 
     scip_parameters = {'separating/maxrounds': 0, 'presolving/maxrestarts': 0, 'limits/time': 100} # TODO: revert to 2700
@@ -59,11 +59,11 @@ if __name__ == "__main__":
                                                 scip_params=scip_parameters)
     
     generators = {
-        #'setcover':(
-        #    ecole.instance.SetCoverGenerator(n_rows=500, n_cols=1000, density=0.05),
-        #    ecole.instance.SetCoverGenerator(n_rows=1000, n_cols=1000, density=0.05),
-        #    ecole.instance.SetCoverGenerator(n_rows=2000, n_cols=1000, density=0.05)
-        #),
+        'setcover':(
+            ecole.instance.SetCoverGenerator(n_rows=500, n_cols=1000, density=0.05),
+            ecole.instance.SetCoverGenerator(n_rows=1000, n_cols=1000, density=0.05),
+            ecole.instance.SetCoverGenerator(n_rows=2000, n_cols=1000, density=0.05)
+        ),
         'cauctions': (
             ecole.instance.CombinatorialAuctionGenerator(n_items=100, n_bids=500),
             ecole.instance.CombinatorialAuctionGenerator(n_items=100, n_bids=1000),
@@ -117,7 +117,7 @@ if __name__ == "__main__":
                     scores = observation
                     action = action_set[observation[action_set].argmax()]
                     observation, action_set, _, done, info = default_env.step(action)
-                defaul_nb_nodes, default_time = info['nb_nodes'], info['time'] 
+                default_nb_nodes, default_time = info['nb_nodes'], info['time'] 
                 
                 #log(f"Instance {instance_count: >3} | SCIP nb nodes    {int(default_info['nb_nodes']): >4d}  | SCIP time   {default_info['time']: >6.2f} ")
                 #log(f"             | GNN  nb nodes    {int(nb_nodes): >4d}  | GNN  time   {time: >6.2f} ")

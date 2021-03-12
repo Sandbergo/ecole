@@ -319,7 +319,7 @@ if __name__ == "__main__":
 
             observation, action_set, _, done, _ = env.step(action)
 
-        log(f"Episode {episode_counter}, {sample_counter} / {MAX SAMPLES} samples collected so far")
+        log(f"Episode {episode_counter}, {sample_counter} / {MAX_SAMPLES} samples collected so far")
 
 
     # -- TRAIN -- #

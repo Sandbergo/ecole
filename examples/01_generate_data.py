@@ -70,8 +70,8 @@ if __name__ == "__main__":
     basedir = "examples/data/samples/"
 
     generators = {
-        #'setcover':ecole.instance.SetCoverGenerator(n_rows=500, n_cols=1000, density=0.05),
-        'cauctions': ecole.instance.CombinatorialAuctionGenerator(n_items=100, n_bids=500),
+        'setcover':ecole.instance.SetCoverGenerator(n_rows=500, n_cols=1000, density=0.05),
+        #'cauctions': ecole.instance.CombinatorialAuctionGenerator(n_items=100, n_bids=500),
         #'indset': ecole.instance.CapacitatedFacilityLocationGenerator(n_customers=100, n_facilities=100),
         #'facilities': ecole.instance.IndependentSetGenerator(n_nodes=500, graph_type="erdos_renyi"),
         }
@@ -92,19 +92,19 @@ if __name__ == "__main__":
                 observation, action_set, _, done, _ = env.reset(next(instances))
                 while not done:
                     (scores, scores_are_expert), node_observation = observation
-                   
+
+                    node_observation = (node_observation.row_features,
+                                        (node_observation.edge_features.indices, 
+                                        node_observation.edge_features.values),
+                                        node_observation.column_features)
+                    
+                    action = action_set[scores[action_set].argmax()]
                     # exit(0)
                     # Only save samples if they are coming from the expert (strong branching)
                     if scores_are_expert and not max_samples_reached:
 
                         sample_counter += 1
-                        node_observation = (node_observation.row_features,
-                                        (node_observation.edge_features.indices, 
-                                        node_observation.edge_features.values),
-                                        node_observation.column_features, )
-                        # save khalil as well :) 
-                        action = action_set[scores[action_set].argmax()]
-                        
+                
                         data = [node_observation, action, action_set, scores]
                         filename = f'{path}/sample_{sample_counter}.pkl'
 
