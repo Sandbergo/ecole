@@ -3,52 +3,65 @@ import pickle
 import numpy as np
 import ecole
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 import torch_geometric
 import os
 from pathlib import Path
 from utilities import Logger
+#from models.mlp import MLPDataset
+#from models.mlp import process
+#from models.mlp import MLPPolicy
 
 # TODO: what do 
 
+
 class MLPDataset(torch.utils.data.Dataset):
-    def __init__(self, sample_files, weighing_scheme="sigmoidal_decay"):
+    """
+    This class encodes a collection of graphs, as well as a method to load such graphs from the disk.
+    It can be used in turn by the data loaders provided by pytorch geometric.
+    """
+    def __init__(self, sample_files):
         self.sample_files = sample_files
-        self.weighing_scheme = weighing_scheme if weighing_scheme != "" else "constant"
 
     def __len__(self):
         return len(self.sample_files)
 
     def __getitem__(self, index):
+        """
+        This method loads a node bipartite graph observation as saved on the disk during data collection.
+        """
         with gzip.open(self.sample_files[index], 'rb') as f:
             sample = pickle.load(f)
 
-        is_root = "root" in self.sample_files[index]
+        sample_observation, sample_action, sample_action_set, sample_scores = sample
+        
 
-        obss, target, obss_feats, _ = sample['obss']
-        v, _, _ = obss
-        sample_cand_scores = obss_feats['scores']
-        sample_cands = np.where(sample_cand_scores != -1)[0]
+        variable_features = torch.from_numpy(sample_observation.astype(np.float32))
+        
+        # We note on which variables we were allowed to branch, the scores as well as the choice 
+        # taken by strong branching (relative to the candidates)
+        candidates = torch.LongTensor(np.array(sample_action_set, dtype=np.int32))
+        candidate_scores = torch.FloatTensor([sample_scores[j] for j in candidates])
+        candidate_choice = torch.where(candidates == sample_action)[0][0]
+        sample_observation = torch.LongTensor(np.array(sample_observation, dtype=np.float32))
+        # test
+        
+        print(sample_observation.shape, candidates.shape)
+        exit(0)
+        # \test
 
-        v_feats = v[sample_cands]
-        v_feats = utilities._preprocess(v_feats, mode='min-max-2')
+        v_feats = sample_observation[candidates]
+        #v_feats = utilities._preprocess(v_feats, mode='min-max-2')
 
-        cand_scores = sample_cand_scores[sample_cands]
-        sample_action = np.where(sample_cands == target)[0][0]
+        cand_scores = sample_cand_scores[candidates]
+        sample_action = np.where(candidates == target)[0][0]
 
-        weight = obss_feats['depth']/sample['max_depth'] if sample['max_depth'] else 1.0
-        if self.weighing_scheme == "sigmoidal_decay":
-            weight = (1 + np.exp(-0.5))/(1 + np.exp(weight - 0.5))
-        elif self.weighing_scheme == "constant":
-            weight = 1.0
-        else:
-            raise ValueError(f"Unknown value for node weights: {self.weighing_scheme}")
-
-        return v_feats, sample_action, cand_scores, weight
+        return v_feats, sample_action, cand_scores
 
 
 def load_batch(sample_batch):
-    cand_featuress, sample_actions, cand_scoress, weights = list(zip(*sample_batch))
+    cand_featuress, sample_actions, cand_scoress = list(zip(*sample_batch))
 
     n_cands = [cds.shape[0] for cds in cand_featuress]
 
@@ -57,16 +70,14 @@ def load_batch(sample_batch):
     cand_scoress = np.concatenate(cand_scoress, axis=0)
     n_cands = np.array(n_cands)
     best_actions = np.array(sample_actions)
-    weights = np.array(weights)
 
     # convert to tensors
     cand_featuress = torch.as_tensor(cand_featuress, dtype=torch.float32)
     cand_scoress = torch.as_tensor(cand_scoress, dtype=torch.float32)
     n_cands = torch.as_tensor(n_cands, dtype=torch.int32)
     best_actions = torch.as_tensor(sample_actions, dtype=torch.long)
-    weights = torch.as_tensor(weights, dtype=torch.float32)
 
-    return cand_featuress, n_cands, best_actions, cand_scoress, weights
+    return cand_featuress, n_cands, best_actions, cand_scoress
 
 
 class Model(torch.nn.Module):
@@ -92,63 +103,11 @@ class MLPPolicy(Model):
         self.ff_size = 256
 
         self.activation = torch.nn.ReLU()
-        # Original, seed 0
-        self.output_module = nn.Sequential(
-            nn.Linear(self.n_input_feats, self.ff_size, bias=True),
-            self.activation,
-            nn.Linear(self.ff_size, self.ff_size, bias=True),
-            self.activation,
-            nn.Linear(self.ff_size, self.ff_size, bias=True),
-            self.activation,
-            nn.Linear(self.ff_size, 1, bias=False),
-        )
-        """
-        # seed 46
-        self.output_module = nn.Sequential(
-            nn.Linear(self.n_input_feats, self.ff_size*4, bias=True),
-            self.activation,
-            nn.Linear(self.ff_size*4, self.ff_size*2, bias=True),
-            self.activation,
-            nn.Linear(self.ff_size*2, self.ff_size, bias=True),
-            self.activation,
-            nn.Linear(self.ff_size, 1, bias=True),
-        )
-        # seed 35
-        self.output_module = nn.Sequential(
-            nn.Linear(self.n_input_feats, 512, bias=True),
-            self.activation,
-            nn.Linear(512, 256, bias=True),
-            self.activation,
-            nn.Linear(256, 64, bias=True),
-            self.activation,
-            nn.Linear(64, 1, bias=True),
-        )
-        
-        
-        
-        # seed 70
-        self.output_module = nn.Sequential(
-            nn.Linear(self.n_input_feats, self.ff_size*4, bias=True),
-            self.activation,
-            nn.Linear(self.ff_size*4, self.ff_size*4, bias=True),
-            self.activation,
-            nn.Linear(self.ff_size*4, self.ff_size*4, bias=True),
-            self.activation,
-            nn.Linear(self.ff_size*4, self.ff_size*4, bias=True),
-            self.activation,
-            nn.Linear(self.ff_size*4, self.ff_size*4, bias=True),
-            self.activation,
-            nn.Linear(self.ff_size*4, self.ff_size*4, bias=True),
-            self.activation,
-            nn.Linear(self.ff_size*4, 1, bias=True),
-        )"""
 
-        # Seed 61
         self.output_module = nn.Sequential(
             nn.Linear(self.n_input_feats, 1, bias=True),
         )
         
-        print(self.output_module)
         self.initialize_parameters()
 
     @staticmethod
@@ -180,7 +139,7 @@ class MLPPolicy(Model):
         return output
 
 
-def process(policy, data_loader, optimizer=None):
+def process(policy, data_loader, DEVICE='cuda', optimizer=None):
     """
     This function will process a whole epoch of training or validation, depending on whether an optimizer is provided.
     """
@@ -232,115 +191,42 @@ def pad_tensor(input_, pad_sizes, pad_value=-1e8):
 if __name__ == "__main__":
 
     LEARNING_RATE = 0.001
-    NB_EPOCHS = 50
+    NB_EPOCHS = 3
     PATIENCE = 10
     EARLY_STOPPING = 20
     DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    PROBLEM = 'setcover'
 
     Path('examples/log/').mkdir(exist_ok=True)
-    log = Logger(filename='examples/log/train_log.txt')
+    log = Logger(filename='examples/log/train_log_MLP.txt')
 
-    sample_files = [str(path) for path in Path('samples/').glob('sample_*.pkl')]
+    sample_files = [str(path) for path in Path(f'examples/data/samples/{PROBLEM}/mlp/train').glob('sample_*.pkl')]
     train_files = sample_files[:int(0.8*len(sample_files))]
     valid_files = sample_files[int(0.8*len(sample_files)):]
 
-    train_data = GraphDataset(train_files)
-    train_loader = torch_geometric.data.DataLoader(train_data, batch_size=32, shuffle=True)
-    valid_data = GraphDataset(valid_files)
-    valid_loader = torch_geometric.data.DataLoader(valid_data, batch_size=128, shuffle=False)
+    train_data = MLPDataset(train_files)
+    #train_loader = torch.data.DataLoader(train_data, batch_size=32, shuffle=True)
+    valid_data = MLPDataset(valid_files)
+    #valid_loader = torch.data.DataLoader(valid_data, batch_size=128, shuffle=False)
 
-    policy = GNNPolicy().to(DEVICE)
+    train_loader = torch.utils.data.DataLoader(
+        train_data, batch_size=32,
+        shuffle=True, collate_fn=load_batch)
+    valid_loader = torch.utils.data.DataLoader(
+        valid_data, batch_size=128,
+        shuffle=True, collate_fn=load_batch)
 
-    # observation = train_data[0].to(DEVICE)
-
-    # logits = policy(observation.constraint_features, observation.edge_index, observation.edge_attr, observation.variable_features)
-    # action_distribution = F.softmax(logits[observation.candidates], dim=-1)
-
-    # print(action_distribution)
+    policy = MLPPolicy().to(DEVICE)
 
     optimizer = torch.optim.Adam(policy.parameters(), lr=LEARNING_RATE)
 
     for epoch in range(NB_EPOCHS):
         log(f"Epoch {epoch+1}")
         
-        train_loss, train_acc = process(policy, train_loader, optimizer)
+        train_loss, train_acc = process(policy, train_loader, DEVICE, optimizer)
         log(f"Train loss: {train_loss:0.3f}, accuracy {train_acc:0.3f}")
 
-        valid_loss, valid_acc = process(policy, valid_loader, None)
+        valid_loss, valid_acc = process(policy, valid_loader, DEVICE, None)
         log(f"Valid loss: {valid_loss:0.3f}, accuracy {valid_acc:0.3f}")
 
-    torch.save(policy.state_dict(), 'examples/models/gnn_trained_params.pkl')
-
-
-    # -- EVALUATE -- #
-
-    scip_parameters = {'separating/maxrounds': 0, 'presolving/maxrestarts': 0, 'limits/time': 3600}
-    env = ecole.environment.Branching(observation_function=ecole.observation.NodeBipartite(), 
-                                    information_function={"nb_nodes": ecole.reward.NNodes(), 
-                                                            "time": ecole.reward.SolvingTime()}, 
-                                    scip_params=scip_parameters)
-    default_env = ecole.environment.Configuring(observation_function=None,
-                                                information_function={"nb_nodes": ecole.reward.NNodes(), 
-                                                                    "time": ecole.reward.SolvingTime()}, 
-                                                scip_params=scip_parameters)
-
-    instances = ecole.instance.SetCoverGenerator(n_rows=500, n_cols=1000, density=0.05)
-    for instance_count, instance in zip(range(20), instances):
-        # Run the GNN brancher
-        nb_nodes, time = 0, 0
-        observation, action_set, _, done, info = env.reset(instance)
-        nb_nodes += info['nb_nodes']
-        time += info['time']
-        while not done:
-            with torch.no_grad():
-                observation = (torch.from_numpy(observation.row_features.astype(np.float32)).to(DEVICE),
-                            torch.from_numpy(observation.edge_features.indices.astype(np.int64)).to(DEVICE), 
-                            torch.from_numpy(observation.edge_features.values.astype(np.float32)).view(-1, 1).to(DEVICE),
-                            torch.from_numpy(observation.column_features.astype(np.float32)).to(DEVICE))
-                logits = policy(*observation)
-                action = action_set[logits[action_set.astype(np.int64)].argmax()]
-                observation, action_set, _, done, info = env.step(action)
-            nb_nodes += info['nb_nodes']
-            time += info['time']
-
-        # Run SCIP's default brancher
-        default_env.reset(instance)
-        _, _, _, _, default_info = default_env.step({})
-        
-        log(f"Instance {instance_count: >3} | SCIP nb nodes    {int(default_info['nb_nodes']): >4d}  | SCIP time   {default_info['time']: >6.2f} ")
-        log(f"             | GNN  nb nodes    {int(nb_nodes): >4d}  | GNN  time   {time: >6.2f} ")
-        log(f"             | Gain         {100*(1-nb_nodes/default_info['nb_nodes']): >8.2f}% | Gain      {100*(1-time/default_info['time']): >8.2f}%")
-
-    instances = ecole.instance.SetCoverGenerator(n_rows=500, n_cols=1000, density=0.05)
-    scip_parameters = {'separating/maxrounds': 0, 'presolving/maxrestarts': 0, 'limits/time': 3600}
-    env = ecole.environment.Branching(observation_function=ecole.observation.NodeBipartite(), 
-                                    information_function={"nb_nodes": ecole.reward.NNodes().cumsum(), 
-                                                            "time": ecole.reward.SolvingTime().cumsum()}, 
-                                    scip_params=scip_parameters)
-    default_env = ecole.environment.Configuring(observation_function=None,
-                                                information_function={"nb_nodes": ecole.reward.NNodes().cumsum(), 
-                                                                    "time": ecole.reward.SolvingTime().cumsum()}, 
-                                                scip_params=scip_parameters)
-
-    for instance_count, instance in zip(range(20), instances):
-        # Run the GNN brancher
-        observation, action_set, _, done, info = env.reset(instance)
-        while not done:
-            with torch.no_grad():
-                observation = (torch.from_numpy(observation.row_features.astype(np.float32)).to(DEVICE),
-                            torch.from_numpy(observation.edge_features.indices.astype(np.int64)).to(DEVICE), 
-                            torch.from_numpy(observation.edge_features.values.astype(np.float32)).view(-1, 1).to(DEVICE),
-                            torch.from_numpy(observation.column_features.astype(np.float32)).to(DEVICE))
-                logits = policy(*observation)
-                action = action_set[logits[action_set.astype(np.int64)].argmax()]
-                observation, action_set, _, done, info = env.step(action)
-        nb_nodes = info['nb_nodes']
-        time = info['time']
-
-        # Run SCIP's default brancher
-        default_env.reset(instance)
-        _, _, _, _, default_info = default_env.step({})
-
-        log(f"Instance {instance_count: >3} | SCIP nb nodes    {int(default_info['nb_nodes']): >4d}  | SCIP time   {default_info['time']: >6.2f} ")
-        log(f"             | GNN  nb nodes    {int(nb_nodes): >4d}  | GNN  time   {time: >6.2f} ")
-        log(f"             | Gain         {100*(1-nb_nodes/default_info['nb_nodes']): >8.2f}% | Gain      {100*(1-time/default_info['time']): >8.2f}%")
+    torch.save(policy.state_dict(), f'examples/models/mlp_trained_params_{PROBLEM}.pkl')
