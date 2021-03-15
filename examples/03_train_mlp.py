@@ -13,8 +13,6 @@ from utilities import Logger
 #from models.mlp import process
 #from models.mlp import MLPPolicy
 
-# TODO: what do 
-
 
 class MLPDataset(torch.utils.data.Dataset):
     """
@@ -36,33 +34,28 @@ class MLPDataset(torch.utils.data.Dataset):
 
         sample_observation, sample_action, sample_action_set, sample_scores = sample
         
-
-        variable_features = torch.from_numpy(sample_observation.astype(np.float32))
+        constraint_features, (edge_indices, edge_features), variable_features = sample_observation
+        #constraint_features = torch.from_numpy(constraint_features.astype(np.float32))
+        #edge_indices = torch.from_numpy(edge_indices.astype(np.int64))
+        #edge_features = torch.from_numpy(edge_features.astype(np.float32)).view(-1, 1)
+       
+        variable_features = torch.from_numpy(variable_features.astype(np.float32))
+        
         
         # We note on which variables we were allowed to branch, the scores as well as the choice 
         # taken by strong branching (relative to the candidates)
         candidates = torch.LongTensor(np.array(sample_action_set, dtype=np.int32))
         candidate_scores = torch.FloatTensor([sample_scores[j] for j in candidates])
         candidate_choice = torch.where(candidates == sample_action)[0][0]
-        sample_observation = torch.LongTensor(np.array(sample_observation, dtype=np.float32))
-        # test
-        
-        print(sample_observation.shape, candidates.shape)
-        exit(0)
-        # \test
 
-        v_feats = sample_observation[candidates]
-        #v_feats = utilities._preprocess(v_feats, mode='min-max-2')
-
-        cand_scores = sample_cand_scores[candidates]
-        sample_action = np.where(candidates == target)[0][0]
-
-        return v_feats, sample_action, cand_scores
+        return variable_features, candidates, sample_action, candidate_scores
 
 
 def load_batch(sample_batch):
-    cand_featuress, sample_actions, cand_scoress = list(zip(*sample_batch))
-
+    cand_featuress, candidates, sample_actions, cand_scoress = list(zip(*sample_batch))
+    #print(type(cand_featuress))
+    #print(len(cand_featuress))
+    #exit(0)
     n_cands = [cds.shape[0] for cds in cand_featuress]
 
     # convert to numpy arrays
@@ -77,7 +70,9 @@ def load_batch(sample_batch):
     n_cands = torch.as_tensor(n_cands, dtype=torch.int32)
     best_actions = torch.as_tensor(sample_actions, dtype=torch.long)
 
-    return cand_featuress, n_cands, best_actions, cand_scoress
+    print(type(cand_featuress), type(candidates), type(n_cands), type(best_actions), type(cand_scoress))
+    exit(0)
+    return cand_featuress, candidates, n_cands, best_actions, cand_scoress
 
 
 class Model(torch.nn.Module):
@@ -99,7 +94,7 @@ class MLPPolicy(Model):
     def __init__(self):
         super(Model, self).__init__()
 
-        self.n_input_feats = 92
+        self.n_input_feats = 19
         self.ff_size = 256
 
         self.activation = torch.nn.ReLU()
@@ -149,28 +144,31 @@ def process(policy, data_loader, DEVICE='cuda', optimizer=None):
     n_samples_processed = 0
     with torch.set_grad_enabled(optimizer is not None):
         for batch in data_loader:
-            batch = batch.to(DEVICE)
+            cand_features, candidates, n_cands, best_actions, cand_scores = map(lambda x:x.to(DEVICE), batch)
+         
+            batched_states = (cand_features)
+            batch_size = n_cands.shape[0]
             # Compute the logits (i.e. pre-softmax activations) according to the policy on the concatenated graphs
-            logits = policy(batch.khalil_features)
+            logits = policy(batched_states)
             # Index the results by the candidates, and split and pad them
-            logits = pad_tensor(logits[batch.candidates], batch.nb_candidates)
+            logits = pad_tensor(logits[candidates], n_cands)
             # Compute the usual cross-entropy classification loss
-            loss = F.cross_entropy(logits, batch.candidate_choices)
+            loss = F.cross_entropy(logits, best_actions)
 
             if optimizer is not None:
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
 
-            true_scores = pad_tensor(batch.candidate_scores, batch.nb_candidates)
+            true_scores = pad_tensor(cand_scores, n_cands)
             true_bestscore = true_scores.max(dim=-1, keepdims=True).values
             
             predicted_bestindex = logits.max(dim=-1, keepdims=True).indices
             accuracy = (true_scores.gather(-1, predicted_bestindex) == true_bestscore).float().mean().item()
 
-            mean_loss += loss.item() * batch.num_graphs
-            mean_acc += accuracy * batch.num_graphs
-            n_samples_processed += batch.num_graphs
+            mean_loss += loss.item() * batch_size
+            mean_acc += accuracy * batch_size
+            n_samples_processed += batch_size
 
     mean_loss /= n_samples_processed
     mean_acc /= n_samples_processed
@@ -200,7 +198,7 @@ if __name__ == "__main__":
     Path('examples/log/').mkdir(exist_ok=True)
     log = Logger(filename='examples/log/train_log_MLP.txt')
 
-    sample_files = [str(path) for path in Path(f'examples/data/samples/{PROBLEM}/mlp/train').glob('sample_*.pkl')]
+    sample_files = [str(path) for path in Path(f'examples/data/samples/{PROBLEM}/train').glob('sample_*.pkl')]
     train_files = sample_files[:int(0.8*len(sample_files))]
     valid_files = sample_files[int(0.8*len(sample_files)):]
 
