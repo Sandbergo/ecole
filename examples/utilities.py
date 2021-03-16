@@ -3,12 +3,16 @@ import datetime
 
 class Logger:
     def __init__(self, filename=None):
-        self.logfile = filename
+        self.logfile = f'{filename}_{self.format_time(file=True)}.txt'
 
-    def format_time(self):
+    def format_time(self, file=False):
         t = datetime.datetime.now()
-        s = t.strftime('%Y-%m-%d %H:%M:%S.%f')
-        return s[:-4]
+        if file: 
+            s = t.strftime('%m%d_%H%M%S')
+        else:
+            s = t.strftime('%m-%d %H:%M:%S.%f')
+            s = s[:-4]
+        return s
 
     def __call__(self, str: str):
         str = f'[{self.format_time()}] {str}'

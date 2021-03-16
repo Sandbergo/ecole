@@ -179,3 +179,5 @@ dmypy.json
 
 # Extra
 *.png
+*.txt
+*.pkl

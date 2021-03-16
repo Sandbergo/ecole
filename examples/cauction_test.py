@@ -14,15 +14,14 @@ if __name__ == "__main__":
 
     generators = {
         'setcover': ecole.instance.SetCoverGenerator(n_rows=500, n_cols=1000, density=0.05),
-        'cauctions': ecole.instance.CombinatorialAuctionGenerator(n_items=100, n_bids=500),
-        'indset': ecole.instance.IndependentSetGenerator(n_nodes=500, graph_type="erdos_renyi", affinity=4),
+        'cauctions': ecole.instance.CombinatorialAuctionGenerator(n_items=100, n_bids=500, add_item_prob=0.7),
+        'indset': ecole.instance.IndependentSetGenerator(n_nodes=500, graph_type="barabasi_albert", affinity=4),
         'facilities': ecole.instance.CapacitatedFacilityLocationGenerator(n_customers=100, n_facilities=100)
         }
     
     for problem_type, generator in generators.items():
         print(f'    Problem: {problem_type}')
-        for instance_count, instance in zip(range(3), generator):
-        
+        for instance_count, instance in zip(range(10), generator):
             default_env.reset(instance)
             _, _, _, _, info = default_env.step({})
 
