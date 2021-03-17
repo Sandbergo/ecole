@@ -16,7 +16,7 @@ if __name__ == "__main__":
         'setcover': ecole.instance.SetCoverGenerator(n_rows=500, n_cols=1000, density=0.05),
         'cauctions': ecole.instance.CombinatorialAuctionGenerator(n_items=100, n_bids=500, add_item_prob=0.7),
         'indset': ecole.instance.IndependentSetGenerator(n_nodes=500, graph_type="barabasi_albert", affinity=4),
-        'facilities': ecole.instance.CapacitatedFacilityLocationGenerator(n_customers=100, n_facilities=100)
+        'facilities': ecole.instance.CapacitatedFacilityLocationGenerator(n_customers=100, n_facilities=100, continuous_assignment = True)
         }
     
     for problem_type, generator in generators.items():

@@ -1,13 +1,6 @@
-import gzip
-import pickle
-import numpy as np
-import ecole
 import torch
 import torch.nn.functional as F
 import torch_geometric
-import os
-from pathlib import Path
-from utilities import Logger
 
 
 class BipartiteGraphConvolution(torch_geometric.nn.MessagePassing):
@@ -47,20 +40,25 @@ class BipartiteGraphConvolution(torch_geometric.nn.MessagePassing):
         """
         This method sends the messages, computed in the message method.
         """
-        output = self.propagate(edge_indices, size=(left_features.shape[0], right_features.shape[0]), 
-                                node_features=(left_features, right_features), edge_features=edge_features)
-        return self.output_module(torch.cat([self.post_conv_module(output), right_features], dim=-1))
+        output = self.propagate(
+            edge_indices, size=(left_features.shape[0], right_features.shape[0]), 
+            node_features=(left_features, right_features), edge_features=edge_features)
+        
+        return self.output_module(
+            torch.cat([self.post_conv_module(output), right_features], dim=-1))
 
     def message(self, node_features_i, node_features_j, edge_features):
-        output = self.feature_module_final(self.feature_module_left(node_features_i) 
-                                           + self.feature_module_edge(edge_features) 
-                                           + self.feature_module_right(node_features_j))
+        output = self.feature_module_final(
+            self.feature_module_left(node_features_i) 
+            + self.feature_module_edge(edge_features) 
+            + self.feature_module_right(node_features_j))
         return output
 
 
 def process(policy, data_loader, device, optimizer=None):
     """
-    This function will process a whole epoch of training or validation, depending on whether an optimizer is provided.
+    This function will process a whole epoch of training or validation, 
+    depending on whether an optimizer is provided.
     """
     mean_loss = 0
     mean_acc = 0
@@ -69,8 +67,12 @@ def process(policy, data_loader, device, optimizer=None):
     with torch.set_grad_enabled(optimizer is not None):
         for batch in data_loader:
             batch = batch.to(device)
-            # Compute the logits (i.e. pre-softmax activations) according to the policy on the concatenated graphs
-            logits = policy(batch.constraint_features, batch.edge_index, batch.edge_attr, batch.variable_features)
+            # Compute the logits (i.e. pre-softmax activations) 
+            # according to the policy on the concatenated graphs
+            logits = policy(batch.constraint_features, 
+                            batch.edge_index, 
+                            batch.edge_attr, 
+                            batch.variable_features)
             # Index the results by the candidates, and split and pad them
            
             logits = pad_tensor(logits[batch.candidates], batch.nb_candidates)
@@ -86,7 +88,8 @@ def process(policy, data_loader, device, optimizer=None):
             true_bestscore = true_scores.max(dim=-1, keepdims=True).values
             
             predicted_bestindex = logits.max(dim=-1, keepdims=True).indices
-            accuracy = (true_scores.gather(-1, predicted_bestindex) == true_bestscore).float().mean().item()
+            accuracy = (true_scores.gather(-1, predicted_bestindex) == true_bestscore
+                       ).float().mean().item()
 
             mean_loss += loss.item() * batch.num_graphs
             mean_acc += accuracy * batch.num_graphs
@@ -99,7 +102,8 @@ def process(policy, data_loader, device, optimizer=None):
 
 def pad_tensor(input_, pad_sizes, pad_value=-1e8):
     """
-    This utility function splits a tensor and pads each split to make them all the same size, then stacks them.
+    This utility function splits a tensor and pads each split to make them 
+    all the same size, then stacks them.
     """
     max_pad_size = pad_sizes.max()
     output = input_.split(pad_sizes.cpu().numpy().tolist())

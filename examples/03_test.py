@@ -1,39 +1,66 @@
+import os
 import gzip
 import pickle
-import numpy as np
 import ecole
 import torch
 import torch.nn.functional as F
 import torch_geometric
-import os
+import numpy as np
 from pathlib import Path
-from utilities import Logger
 
-from models.gnn import process, GNNPolicy
+from utilities_general import Logger
+from models.mlp import MLP1Policy, MLP2Policy, MLP3Policy
+from models.gnn import GNN1Policy, GNN2Policy
 
 
-
-class ExploreThenStrongBranch:
+def process(model, dataloader, top_k):
     """
-    This custom observation function class will randomly return either strong branching scores (expensive expert) 
-    or pseudocost scores (weak expert for exploration) when called at every node.
+    Executes only a forward pass of model over the dataset and computes accuracy
+    Parameters
+    ----------
+    model : model.BaseModel
+        A base model, which may contain some model.PreNormLayer layers.
+    dataloader : torch.utils.data.DataLoader
+        Dataset to use for training the model.
+    top_k : list
+        list of `k` (int) to estimate for accuracy using these many candidates
+    Return
+    ------
+    mean_kacc : np.array
+        computed accuracy for `top_k` candidates
     """
-    def __init__(self):
-        self.pseudocosts_function = ecole.observation.Pseudocosts()
-        
-    def before_reset(self, model):
-        """
-        This function will be called at initialization of the environment (before dynamics are reset).
-        """
-        self.pseudocosts_function.before_reset(model)
 
-    def extract(self, model, done):
-        """
-        Should we return strong branching or pseudocost scores at time node?
-        """
+    mean_kacc = np.zeros(len(top_k))
 
-        return self.pseudocosts_function.extract(model, done)
+    n_samples_processed = 0
+    for batch in dataloader:
+        cand_features, n_cands, best_cands, cand_scores, weights  = map(lambda x:x.to(device), batch)
+        batched_states = (cand_features)
+        batch_size = n_cands.shape[0]
+        weights /= batch_size # sum loss
 
+        with torch.no_grad():
+            logits = model(batched_states)  # eval mode
+            logits = model.pad_output(logits, n_cands)  # apply padding now
+
+        true_scores = model.pad_output(torch.reshape(cand_scores, (1, -1)), n_cands)
+        true_bestscore = torch.max(true_scores, dim=-1, keepdims=True).values
+        true_scores = true_scores.cpu().numpy()
+        true_bestscore = true_bestscore.cpu().numpy()
+
+        kacc = []
+        for k in top_k:
+            pred_top_k = torch.topk(logits, k=k).indices.cpu().numpy()
+            pred_top_k_true_scores = np.take_along_axis(true_scores, pred_top_k, axis=1)
+            kacc.append(np.mean(np.any(pred_top_k_true_scores == true_bestscore, axis=1)))
+        kacc = np.asarray(kacc)
+
+        mean_kacc += kacc * batch_size
+        n_samples_processed += batch_size
+
+    mean_kacc /= n_samples_processed
+
+    return mean_kacc
 
 
 if __name__ == "__main__":
@@ -45,7 +72,7 @@ if __name__ == "__main__":
 
     policy = GNNPolicy().to(DEVICE)
     policy.load_state_dict(torch.load('examples/models/gnn_trained_params_setcover.pkl'))
-    
+
 
     scip_parameters = {'separating/maxrounds': 0, 'presolving/maxrestarts': 0, 'limits/time': 100} # TODO: revert to 2700
     env = ecole.environment.Branching(observation_function=ecole.observation.NodeBipartite(), 
@@ -57,7 +84,7 @@ if __name__ == "__main__":
                                                 information_function={"nb_nodes": ecole.reward.NNodes().cumsum(), 
                                                                     "time": ecole.reward.SolvingTime().cumsum()}, 
                                                 scip_params=scip_parameters)
-    
+
     generators = {
         'setcover':(
             ecole.instance.SetCoverGenerator(n_rows=500, n_cols=1000, density=0.05),

@@ -4,22 +4,23 @@ import gzip
 import pickle
 import numpy as np
 from pathlib import Path
-from utilities import Logger
+from utilities_general import Logger
 
 
 class ExploreThenStrongBranch:
     """
-    This custom observation function class will randomly return either strong branching scores (expensive expert) 
+    This custom observation function class will randomly return either strong branching scores
     or pseudocost scores (weak expert for exploration) when called at every node.
     """
     def __init__(self, expert_probability):
         self.expert_probability = expert_probability
         self.pseudocosts_function = ecole.observation.Pseudocosts()
         self.strong_branching_function = ecole.observation.StrongBranchingScores()
-        
+
     def before_reset(self, model):
         """
-        This function will be called at initialization of the environment (before dynamics are reset).
+        This function will be called at initialization of the environment 
+        (before dynamics are reset).
         """
         self.pseudocosts_function.before_reset(model)
         self.strong_branching_function.before_reset(model)
@@ -41,23 +42,19 @@ if __name__ == "__main__":
     # MAX_SAMPLES = 10_000
 
     Path('examples/log/').mkdir(exist_ok=True)
-    log = Logger(filename='examples/log/data_log.txt')
+    log = Logger(filename='examples/log/01_generate_data')
 
     # We can pass custom SCIP parameters easily
     scip_parameters = {'separating/maxrounds': 0, 'presolving/maxrestarts': 0, 'limits/time': 3600}
 
     # Note how we can tuple observation functions to return complex state information
-    env = ecole.environment.Branching(observation_function=(ExploreThenStrongBranch(expert_probability=0.05),
-                                                            ecole.observation.NodeBipartite()), 
-                                    scip_params=scip_parameters)
+    env = ecole.environment.Branching(
+        observation_function=(ExploreThenStrongBranch(expert_probability=0.05),
+                              ecole.observation.NodeBipartite()), 
+        scip_params=scip_parameters)
     # TODO: original expert_prob=0.05
     # This will seed the environment for reproducibility
     env.seed(0)
-
-    PROBLEMS = {'setcover': (500, 1000, 0.05), 
-                'cauctions': (100, 500, 0),
-                'indset': (750, 4, 0),
-                'facilities': (100, 100, 5) }
 
     MAX_SAMPLES = 50_000  # 150000
     # VALID_SIZE = 10_000  # 30000
@@ -70,10 +67,10 @@ if __name__ == "__main__":
     basedir = "examples/data/samples/"
 
     generators = {
-        'setcover':ecole.instance.SetCoverGenerator(n_rows=500, n_cols=1000, density=0.05),
-        #'cauctions': ecole.instance.CombinatorialAuctionGenerator(n_items=100, n_bids=500),
-        #'indset': ecole.instance.CapacitatedFacilityLocationGenerator(n_customers=100, n_facilities=100),
-        #'facilities': ecole.instance.IndependentSetGenerator(n_nodes=500, graph_type="erdos_renyi"),
+        'setcover': ecole.instance.SetCoverGenerator(n_rows=500, n_cols=1000, density=0.05),
+        # 'cauctions': ecole.instance.CombinatorialAuctionGenerator(n_items=100, n_bids=500),
+        # 'indset': ecole.instance.CapacitatedFacilityLocationGenerator(n_customers=100, n_facilities=100),
+        # 'facilities': ecole.instance.IndependentSetGenerator(n_nodes=500, graph_type="erdos_renyi"),
         }
     
     try:
@@ -111,14 +108,13 @@ if __name__ == "__main__":
                         with gzip.open(filename, 'wb') as f:
                             pickle.dump(data, f)
                         
-                        # If we collected enough samples, we finish the current episode but stop saving samples
                         if sample_counter >= MAX_SAMPLES:
                             max_samples_reached = True
 
                     observation, action_set, _, done, _ = env.step(action)
 
-                log(f"Episode {episode_counter}, {sample_counter} / {MAX_SAMPLES} samples collected so far")
-                #exit(0)
+                log(f"Episode {episode_counter}, {sample_counter} / {MAX_SAMPLES} samples collected")
+
     except Exception as e:
         log(repr(e))
         raise e

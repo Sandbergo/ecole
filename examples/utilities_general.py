@@ -7,7 +7,7 @@ class Logger:
 
     def format_time(self, file=False):
         t = datetime.datetime.now()
-        if file: 
+        if file:
             s = t.strftime('%m%d_%H%M%S')
         else:
             s = t.strftime('%m-%d %H:%M:%S.%f')

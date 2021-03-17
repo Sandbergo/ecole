@@ -1,18 +1,15 @@
 import gzip
 import pickle
-import numpy as np
-import ecole
 import torch
-import torch.nn.functional as F
 import torch_geometric
-import os
-from pathlib import Path
+import numpy as np
 
 
 class BipartiteNodeData(torch_geometric.data.Data):
     """
-    This class encode a node bipartite graph observation as returned by the `ecole.observation.NodeBipartite` 
-    observation function in a format understood by the pytorch geometric data handlers.
+    This class encode a node bipartite graph observation as returned
+    by the `ecole.observation.NodeBipartite` observation function
+    in a format understood by the pytorch geometric data handlers.
     """
     def __init__(self, constraint_features, edge_indices, edge_features, variable_features,
                  candidates, candidate_choice, candidate_scores):
@@ -28,11 +25,13 @@ class BipartiteNodeData(torch_geometric.data.Data):
 
     def __inc__(self, key, value):
         """
-        We overload the pytorch geometric method that tells how to increment indices when concatenating graphs 
-        for those entries (edge index, candidates) for which this is not obvious.
+        We overload the pytorch geometric method that tells how to increment indices
+        when concatenating graphs for those entries (edge index, candidates)
+        for which this is not obvious.
         """
         if key == 'edge_index':
-            return torch.tensor([[self.constraint_features.size(0)], [self.variable_features.size(0)]])
+            return torch.tensor(
+                [[self.constraint_features.size(0)], [self.variable_features.size(0)]])
         elif key == 'candidates':
             return self.variable_features.size(0)
         else:
@@ -41,7 +40,8 @@ class BipartiteNodeData(torch_geometric.data.Data):
 
 class GraphDataset(torch_geometric.data.Dataset):
     """
-    This class encodes a collection of graphs, as well as a method to load such graphs from the disk.
+    This class encodes a collection of graphs, as well as a method to load 
+    such graphs from the disk.
     It can be used in turn by the data loaders provided by pytorch geometric.
     """
     def __init__(self, sample_files):
@@ -53,7 +53,8 @@ class GraphDataset(torch_geometric.data.Dataset):
 
     def get(self, index):
         """
-        This method loads a node bipartite graph observation as saved on the disk during data collection.
+        This method loads a node bipartite graph observation as saved on the disk
+        during data collection.
         """
         with gzip.open(self.sample_files[index], 'rb') as f:
             sample = pickle.load(f)
@@ -72,8 +73,9 @@ class GraphDataset(torch_geometric.data.Dataset):
         candidate_scores = torch.FloatTensor([sample_scores[j] for j in candidates])
         candidate_choice = torch.where(candidates == sample_action)[0][0]
 
-        graph = BipartiteNodeData(constraint_features, edge_indices, edge_features, variable_features,
-                                  candidates, candidate_choice, candidate_scores)
+        graph = BipartiteNodeData(
+            constraint_features, edge_indices, edge_features, 
+            variable_features, candidates, candidate_choice, candidate_scores)
 
         # We must tell pytorch geometric how many nodes there are, for indexing purposes
         graph.num_nodes = constraint_features.shape[0]+variable_features.shape[0]
