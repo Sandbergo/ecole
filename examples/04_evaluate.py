@@ -1,28 +1,68 @@
-import gzip
-import pickle
 import numpy as np
-import ecole
 import torch
-import torch.nn.functional as F
 import torch_geometric
 import os
+import argparse
 from pathlib import Path
-from utilities import Logger
 
+from utilities_general import Logger
+from utilities_model import process
+from utilities_data import GraphDataset
 from models.mlp import MLP1Policy, MLP2Policy, MLP3Policy
 from models.gnn import GNN1Policy, GNN2Policy
 
 
 if __name__ == "__main__":
-    Path('examples/log/').mkdir(exist_ok=True)
-    log = Logger(filename='examples/log/test_log.txt')
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        '-m', '--model',
+        help='Model name.',
+        choices=['gnn1', 'gnn2', 'mlp1', 'mlp2', 'mlp3'],
+    )
+    parser.add_argument(
+        '-p', '--problem',
+        help='MILP instance type to process.',
+        choices=['setcover', 'cauctions', 'facilities', 'indset'],
+    )
+    parser.add_argument(
+        '-g', '--gpu',
+        help='CUDA GPU id (-1 for CPU).',
+        type=int,
+        default=-1,
+    )
+    parser.add_argument(
+        '-s', '--seed',
+        help='Random generator seed.',
+        type=int,
+        default=0,
+    )
+    args = parser.parse_args()
 
-    DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    log(f'Device: {DEVICE}')
-
-    policy = GNNPolicy().to(DEVICE)
-    policy.load_state_dict(torch.load('examples/models/gnn_trained_params_setcover.pkl'))
+    EARLY_STOPPING = 20
+    POLICY_DICT = {'mlp1': MLP1Policy(), 'mlp2': MLP2Policy(), 'mlp3': MLP3Policy(),
+                   'gnn1': GNN1Policy(), 'gnn2': GNN2Policy(), }
+    PROBLEM = args.problem
     
+    if args.gpu == -1:
+        os.environ['CUDA_VISIBLE_DEVICES'] = ''
+        DEVICE = torch.device('cpu')
+    else:
+        os.environ['CUDA_VISIBLE_DEVICES'] = f'{args.gpu}'
+        DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+    policy = POLICY_DICT[args.model].to(DEVICE)
+
+    rng = np.random.RandomState(args.seed)
+    torch.manual_seed(rng.randint(np.iinfo(int).max))
+
+    Path('examples/log/').mkdir(exist_ok=True)
+    log = Logger(filename='examples/log/04_evaluate')
+    
+    log(f'Model:   {args.model}')
+    log(f'Problem: {PROBLEM}')
+    log(f'Device:  {DEVICE}')
+    log(str(policy))
+  
 
     scip_parameters = {'separating/maxrounds': 0, 'presolving/maxrestarts': 0, 'limits/time': 100} # TODO: revert to 2700
     env = ecole.environment.Branching(observation_function=ecole.observation.NodeBipartite(), 
@@ -61,16 +101,14 @@ if __name__ == "__main__":
         }
     sizes = ['small', 'medium', 'large']
     for problem_type in generators.keys():
-        i = 0
         scip_time,gnn_time = [],[]
         scip_nodes,gnn_nodes = [],[]
-        for instances in generators[problem_type]:      
+        for i, instances in enumerate(generators[problem_type]):      
             log(f'------ {problem_type}, {sizes[i]} ------')
             for instance_count, instance in zip(range(5), instances):
                 
                 # Run the GNN brancher
                 
-                #default_env.reset(instance)
                 observation, action_set, _, done, info = env.reset(instance)
                 
                 while not done:
@@ -84,29 +122,19 @@ if __name__ == "__main__":
                         observation, action_set, _, done, info = env.step(action)
                 nb_nodes, time = info['nb_nodes'], info['time']
                 # Run SCIP's default brancher
-                
-                # default_env.reset(instance)
-                #_, _, _, done, default_info = default_env.step({})
-                #print(done)
+              
                 observation, action_set, _, done, info = default_env.reset(instance)
                 
                 while not done:
                     scores = observation
-                    action = action_set[observation[action_set].argmax()]
+                    action = action_set[scores[action_set].argmax()]
                     observation, action_set, _, done, info = default_env.step(action)
                 default_nb_nodes, default_time = info['nb_nodes'], info['time'] 
-                
-                #log(f"Instance {instance_count: >3} | SCIP nb nodes    {int(default_info['nb_nodes']): >4d}  | SCIP time   {default_info['time']: >6.2f} ")
-                #log(f"             | GNN  nb nodes    {int(nb_nodes): >4d}  | GNN  time   {time: >6.2f} ")
-                #log(f"             | Gain         {100*(1-nb_nodes/default_info['nb_nodes']): >8.2f}% | Gain      {100*(1-time/default_info['time']): >8.2f}%")
-                
                 
                 scip_nodes.append(default_nb_nodes)
                 scip_time.append(default_time)
                 gnn_nodes.append(nb_nodes)
                 gnn_time.append(time)
+            
             log(f"SCIP nb nodes    {int(np.mean(scip_nodes)): >4d}  | SCIP time   {np.mean(scip_time): >6.2f} ")
             log(f"GNN nb nodes     {int(np.mean(gnn_nodes)): >4d}  |  GNN time   {np.mean(gnn_time): >6.2f} ")
-            #log(f"             | completed...")
-                
-            i += 1
